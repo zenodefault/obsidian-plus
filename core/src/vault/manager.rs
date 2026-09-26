@@ -555,6 +555,35 @@ impl SyncManager {
     pub fn detect_contradictions(&self) -> Result<u64, RpcError> {
         crate::memory::detect_contradictions(self.index.connection()).map_err(db_err)
     }
+
+    /// `brain.ask` (§56–58, §107): classify → assemble context → generate
+    /// (locally, when a generate-capable model is configured) → validate
+    /// citations → answer. Never acts on the vault; generation failures and
+    /// model absence degrade to the deterministic evidence summary (§76).
+    pub fn ask(&self, query: &str, limit: Option<usize>) -> Result<crate::reasoning::AskResult, RpcError> {
+        if query.trim().is_empty() {
+            return Err(RpcError::new(
+                ErrorCode::InvalidParams,
+                "query must not be empty",
+            ));
+        }
+        let settings = crate::models::ModelSettings::load(self.index.connection());
+        let provider: Box<dyn crate::models::ModelProvider> =
+            match crate::models::select_provider(&settings) {
+                Ok(p) => p,
+                Err(e) => {
+                    crate::utils::logging::log(
+                        crate::utils::logging::Level::Warn,
+                        "reasoning",
+                        "model unavailable; answering from evidence only",
+                        serde_json::json!({ "error": e.to_string() }),
+                    );
+                    Box::new(crate::models::HashEmbeddingProvider::new())
+                }
+            };
+        let limit = limit.unwrap_or(crate::reasoning::DEFAULT_CONTEXT_LIMIT);
+        crate::reasoning::answer(&self.index, provider.as_ref(), query, limit).map_err(db_err)
+    }
 }
 
 fn no_session() -> RpcError {

@@ -59,7 +59,7 @@ d("core integration (real binary)", () => {
   });
 
   it("surfaces METHOD_NOT_FOUND as a typed RpcError", async () => {
-    const promise = daemon.request("brain.ask", { query: "test" });
+    const promise = daemon.request("agent.plan", { query: "test" }); // brain.ask is real since Part 7
     await expect(promise).rejects.toSatisfy((err: unknown) => {
       const e = err as RpcErrorImpl;
       return e instanceof Error && (e as RpcErrorImpl).code === "METHOD_NOT_FOUND";

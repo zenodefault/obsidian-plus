@@ -56,13 +56,13 @@ fn shutdown_notification_sets_flag_without_reply() {
 #[test]
 fn unknown_method_yields_method_not_found() {
     let state = DispatchState::new();
-    let env = Envelope::request("r3", "brain.ask", json!({}));
+    let env = Envelope::request("r3", "agent.plan", json!({}));
     match dispatch(&env, &state, &vault()) {
         Outcome::Reply(reply) => {
             let err = reply.error.expect("error object");
             assert_eq!(err.code, ErrorCode::MethodNotFound);
             assert_eq!(err.request_id.as_deref(), Some("r3"));
-            assert!(err.message.contains("brain.ask"));
+            assert!(err.message.contains("agent.plan"));
         }
         other => panic!("expected reply, got {other:?}"),
     }

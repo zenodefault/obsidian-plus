@@ -194,6 +194,9 @@ pub struct ScoreBreakdown {
     pub entity: f64,
 }
 
+// ---- Reasoning protocol types (§56–58, §87) — re-exported from the engine.
+pub use crate::reasoning::{AskParams, AskResult, AskSource, QueryType};
+
 // ---- Memory protocol types (§49–55) — re-exported from the memory engine.
 pub use crate::memory::{
     ContradictionEntry, ClaimRef, MemoryEntry, MemorySource, Resolution,

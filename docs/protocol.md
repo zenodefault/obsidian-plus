@@ -68,6 +68,7 @@ Rules:
 | `memory.supersede` | `{ id, content, type? }` | `{ memory: MemoryEntry }` |
 | `contradiction.list` | `{}` | `{ contradictions: [{id, kind, status, claim_a, claim_b, created_at}] }` |
 | `contradiction.resolve` | `{ id, resolution: keep_both\|mark_later_current\|ignore }` | `{ message }` |
+| `brain.ask` | `{ query, limit?: usize 1..=20 }` | `{ answer, query_type, confidence, answer_mode, sources: [{note_id, note_path, chunk_id, heading_path, snippet, score}], memories: MemoryEntry[], contradictions: [...] }` |
 
 Lifecycle rules:
 
@@ -136,6 +137,41 @@ conflicts across notes; detection is conservative (same subject + same type +
 opposite polarity) and shows both sources — never auto-chooses (§54).
 Deletion of source notes marks memories `stale` for review, never deletes
 them (§55). Accepted memories survive re-indexing (§90).
+
+## Reasoning (Part 7)
+
+`brain.ask` implements the §56 pipeline: classify → retrieve → memory
+retrieval → relationship expansion → context assembly → (local LLM) →
+citation validation → answer.
+
+- **Classification (§95)** is deterministic keyword matching into
+  `simple_search | semantic_search | synthesis | comparison | temporal |
+  contradiction | decision | relationship | agent_task`. Simple searches never
+  trigger expensive reasoning (§94).
+- **Context assembly** blends hybrid retrieval hits (§42, §44), accepted
+  memories sharing query tokens (§49), claims and relationships of entities
+  the query names, and open contradictions touching the query (all of them for
+  contradiction analyses — §54: show both, never choose).
+- **Generation** uses the local `ModelProvider.generate` (§75). Its prompt is
+  hard-grounded: answer only from the evidence, cite note paths, and reply
+  with the exact no-evidence sentence when evidence is missing. Retrieved
+  content is framed as data, never as instructions (§67).
+- **Citation validation (§58)**: a model answer survives only when it cites
+  at least one source and every citation resolves to the retrieved context
+  (full path, basename, wikilink or markdown link all resolve). Otherwise the
+  deterministic evidence summary — whose every bullet cites its note — is
+  returned instead.
+- **Degradation (§76)**: with the default hash embedder (no generate
+  capability) or a failing model, the evidence summary IS the answer. The
+  result carries `answer_mode`:
+  - `model` — LLM output, citations validated;
+  - `evidence` — deterministic summary of retrieved context;
+  - `agent` — vault-action routing message (agent_task queries never generate
+    and never act; changes come only through Part 8's approval flow);
+  - `no_evidence` — the §58 message: "I couldn't find evidence for this in the
+    vault."
+- **Confidence** is deterministic from retrieval quality (0.0 with no
+  evidence, capped at 0.95).
 
 ## Framing constants
 

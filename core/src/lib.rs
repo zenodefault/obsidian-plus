@@ -12,6 +12,7 @@ pub mod memory;
 pub mod models;
 pub mod parser;
 pub mod protocol;
+pub mod reasoning;
 pub mod retrieval;
 pub mod server;
 pub mod storage;

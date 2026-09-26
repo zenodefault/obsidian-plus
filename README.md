@@ -26,7 +26,7 @@ Implementation follows the workstream order in [PLAN.md](PLAN.md) (UI/UX workstr
 | 4 — Knowledge | entities, claims, relationships, provenance | ✅ (AI refinement in Part 7) |
 | 5 — Model Runtime | ModelProvider, hash/CLI embedders, hybrid retrieval | ✅ (GGUF embeddings via user-supplied binary) |
 | 6 — Memory | memory lifecycle, contradictions, stale detection | ✅ |
-| 7 — Reasoning | classification, retrieval pipeline, `brain.ask` | ⬜ |
+| 7 — Reasoning | classification, context assembly, `brain.ask`, citation validation | ✅ (LLM refinement via user-supplied local model) |
 | 8 — Agent & Safety | planner, policy, operations, rollback, audit | ⬜ |
 | 9 — Hardening | security tests, benchmarks | ⬜ |
 

@@ -140,6 +140,39 @@ export interface ContradictionEntry {
   created_at: number;
 }
 
+// ---- Reasoning (§56–58) ----
+
+export type QueryType =
+  | "simple_search"
+  | "semantic_search"
+  | "synthesis"
+  | "comparison"
+  | "temporal"
+  | "contradiction"
+  | "decision"
+  | "relationship"
+  | "agent_task";
+
+export interface AskSource {
+  note_id: string;
+  note_path: string;
+  chunk_id: string;
+  heading_path: string;
+  snippet: string;
+  score: number;
+}
+
+export interface AskResult {
+  answer: string;
+  query_type: QueryType;
+  confidence: number;
+  /** "model" | "evidence" | "agent" | "no_evidence" (§58, §76). */
+  answer_mode: string;
+  sources: AskSource[];
+  memories: MemoryEntry[];
+  contradictions: ContradictionEntry[];
+}
+
 export type ContradictionResolution = "keep_both" | "mark_later_current" | "ignore";
 
 export interface SearchQueryResult {

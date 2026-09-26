@@ -9,8 +9,9 @@ use crate::protocol::{
     SyncCommitParams, SyncFinishParams, SyncNoteParams, CORE_VERSION, PROTOCOL_VERSION,
 };
 use crate::protocol::{
-    ContradictionListResult, ContradictionResolveParams, ContradictionResolveResult,
-    HealthDuplicateDto, HealthFindingDto, HealthSummaryResult, MemoryIdParams,
+    AskParams, ContradictionListResult, ContradictionResolveParams,
+    ContradictionResolveResult, HealthDuplicateDto, HealthFindingDto, HealthSummaryResult,
+    MemoryIdParams,
 };
 use crate::memory::MemoryApiError;
 use crate::vault::manager::{SyncManager, SyncNoteParams as NoteParamsView};
@@ -74,6 +75,7 @@ pub fn dispatch(env: &Envelope, state: &Arc<DispatchState>, vault: &Arc<SyncMana
         "memory.supersede" => handle_memory_supersede(env, vault),
         "contradiction.list" => handle_contradiction_list(env, vault),
         "contradiction.resolve" => handle_contradiction_resolve(env, vault),
+        "brain.ask" => handle_brain_ask(env, vault),
         _ => {
             if env.id.is_some() {
                 let id = env.id.clone().unwrap_or_default();
@@ -367,6 +369,19 @@ fn handle_contradiction_resolve(env: &Envelope, vault: &Arc<SyncManager>) -> Out
             serde_json::to_value(ContradictionResolveResult { message }).unwrap_or(Value::Null),
         ),
         Err(e) => memory_err(&id, e),
+    }
+}
+
+fn handle_brain_ask(env: &Envelope, vault: &Arc<SyncManager>) -> Outcome {
+    let Some(id) = env.id.clone() else { return Outcome::NoReply };
+    let params: AskParams =
+        match serde_json::from_value(env.params.clone().unwrap_or(Value::Null)) {
+            Ok(p) => p,
+            Err(e) => return invalid_params(&id, e),
+        };
+    match vault.ask(&params.query, params.limit) {
+        Ok(result) => ok(&id, serde_json::to_value(result).unwrap_or(Value::Null)),
+        Err(err) => Outcome::Reply(Envelope::failure(id.clone(), err.with_request_id(id))),
     }
 }
 
