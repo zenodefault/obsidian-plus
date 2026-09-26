@@ -396,6 +396,82 @@ impl SyncManager {
         crate::health::summary(self.index.connection()).map_err(db_err)
     }
 
+    /// `search.query` hybrid arm (§42, §44): lexical + semantic + entity
+    /// ranking, deterministic. Falls back to pure lexical when no provider is
+    /// available (§76: model failure never breaks search).
+    pub fn search_hybrid(
+        &self,
+        query: &str,
+        limit: usize,
+    ) -> Result<Vec<crate::retrieval::HybridHit>, RpcError> {
+        let provider = match crate::models::select_provider(&crate::models::ModelSettings::load(
+            self.index.connection(),
+        )) {
+            Ok(p) => p,
+            Err(e) => {
+                crate::utils::logging::log(
+                    crate::utils::logging::Level::Warn,
+                    "search",
+                    "model unavailable; falling back to lexical search",
+                    serde_json::json!({ "error": e.to_string() }),
+                );
+                let hits = self.index.search(query, limit).map_err(db_err)?;
+                return Ok(hits
+                    .into_iter()
+                    .map(|h| crate::retrieval::HybridHit {
+                        note_id: h.note_id,
+                        note_path: h.note_path,
+                        chunk_id: h.chunk_id,
+                        heading_path: h.heading_path,
+                        snippet: h.snippet,
+                        score: -h.rank,
+                        score_breakdown: None,
+                    })
+                    .collect());
+            }
+        };
+        crate::retrieval::search(&self.index, provider.as_ref(), query, limit).map_err(db_err)
+    }
+
+    /// `models.status` (§74, §76).
+    pub fn models_status(&self) -> Result<crate::models::ModelStatus, RpcError> {
+        let conn = self.index.connection();
+        let settings = crate::models::ModelSettings::load(conn);
+        let (provider_name, model_path, binary_path, dimension, validation_error) =
+            match crate::models::select_provider(&settings) {
+                Ok(p) => (
+                    p.name().to_string(),
+                    settings.embedding_model_path.clone(),
+                    settings.embedding_binary_path.clone(),
+                    p.dimension(),
+                    None,
+                ),
+                Err(e) => (
+                    settings.embedding_provider.clone().unwrap_or_else(|| "hash".to_string()),
+                    settings.embedding_model_path.clone(),
+                    settings.embedding_binary_path.clone(),
+                    0,
+                    Some(e.to_string()),
+                ),
+            };
+        let chunks_total: i64 = conn
+            .query_row("SELECT COUNT(*) FROM chunks", [], |r| r.get(0))
+            .map_err(db_err)?;
+        let chunks_embedded: i64 = conn
+            .query_row("SELECT COUNT(*) FROM chunks WHERE embedding IS NOT NULL", [], |r| r.get(0))
+            .map_err(db_err)?;
+        Ok(crate::models::ModelStatus {
+            provider: provider_name,
+            model_path,
+            binary_path,
+            dimension,
+            chunks_total,
+            chunks_embedded,
+            chunks_pending: chunks_total - chunks_embedded,
+            validation_error,
+        })
+    }
+
     /// Link revalidation after renames/new notes (§68 maintenance).
     pub fn revalidate_links(&self) -> Result<u64, RpcError> {
         crate::knowledge::revalidate_links(self.index.connection()).map_err(db_err)

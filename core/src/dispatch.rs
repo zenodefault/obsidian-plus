@@ -2,10 +2,10 @@
 //! response envelopes. Transport-agnostic so tests can drive it directly.
 
 use crate::protocol::{
-    Envelope, ErrorCode, HealthResult, RebuildParams, RebuildResult, RpcError, SearchHitDto,
-    SearchQueryParams, SearchQueryResult, ShutdownParams, ShutdownResult, StateGetParams,
-    SyncBatchParams, SyncBeginParams, SyncCommitParams, SyncFinishParams, SyncNoteParams,
-    CORE_VERSION, PROTOCOL_VERSION,
+    Envelope, ErrorCode, HealthResult, RebuildParams, RebuildResult, RpcError, ScoreBreakdown,
+    SearchHitDto, SearchQueryParams, SearchQueryResult, ShutdownParams, ShutdownResult,
+    StateGetParams, SyncBatchParams, SyncBeginParams, SyncCommitParams, SyncFinishParams,
+    SyncNoteParams, CORE_VERSION, PROTOCOL_VERSION,
 };
 use crate::protocol::{HealthDuplicateDto, HealthFindingDto, HealthSummaryResult};
 use crate::vault::manager::{SyncManager, SyncNoteParams as NoteParamsView};
@@ -61,6 +61,7 @@ pub fn dispatch(env: &Envelope, state: &Arc<DispatchState>, vault: &Arc<SyncMana
         "vault.rebuild" => handle_vault_rebuild(env, vault),
         "search.query" => handle_search_query(env, vault),
         "health.summary" => handle_health_summary(env, vault),
+        "models.status" => handle_models_status(env, vault),
         _ => {
             if env.id.is_some() {
                 let id = env.id.clone().unwrap_or_default();
@@ -213,7 +214,8 @@ fn handle_search_query(env: &Envelope, vault: &Arc<SyncManager>) -> Outcome {
         ));
     }
     let limit = params.limit.unwrap_or(20).min(100);
-    match vault.search(&params.query, limit) {
+    // Hybrid ranking (§42, §44); degrades to lexical when no model (§76).
+    match vault.search_hybrid(&params.query, limit) {
         Ok(hits) => {
             let dtos: Vec<SearchHitDto> = hits
                 .into_iter()
@@ -223,8 +225,14 @@ fn handle_search_query(env: &Envelope, vault: &Arc<SyncManager>) -> Outcome {
                     chunk_id: h.chunk_id,
                     heading_path: h.heading_path,
                     snippet: h.snippet,
-                    // Negate bm25 (lower is better) so score is higher-is-better.
-                    score: -h.rank,
+                    score: h.score,
+                    score_breakdown: h
+                        .score_breakdown
+                        .map(|b| ScoreBreakdown {
+                            lexical: b.lexical,
+                            semantic: b.semantic,
+                            entity: b.entity,
+                        }),
                 })
                 .collect();
             let result = SearchQueryResult {
@@ -233,6 +241,14 @@ fn handle_search_query(env: &Envelope, vault: &Arc<SyncManager>) -> Outcome {
             };
             ok(&id, serde_json::to_value(result).unwrap_or(Value::Null))
         }
+        Err(err) => Outcome::Reply(Envelope::failure(id.clone(), err.with_request_id(id))),
+    }
+}
+
+fn handle_models_status(env: &Envelope, vault: &Arc<SyncManager>) -> Outcome {
+    let Some(id) = env.id.clone() else { return Outcome::NoReply };
+    match vault.models_status() {
+        Ok(status) => ok(&id, serde_json::to_value(status).unwrap_or(Value::Null)),
         Err(err) => Outcome::Reply(Envelope::failure(id.clone(), err.with_request_id(id))),
     }
 }

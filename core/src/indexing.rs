@@ -1,6 +1,7 @@
 //! Note index: SQLite persistence for notes + chunks + FTS (§78–80, §94).
 
 use crate::chunking;
+use crate::models::vector_to_blob;
 use crate::parser;
 use crate::storage::db;
 use rusqlite::{params, Connection, OptionalExtension};
@@ -115,7 +116,52 @@ impl NoteIndex {
 
         // Knowledge extraction (§45): deterministic, provenance-scoped.
         crate::knowledge::extract_and_persist(&self.conn, &note_id, path, content)?;
+
+        // Batched embedding (§91). Failure degrades gracefully (§76): chunks
+        // keep NULL embeddings and a retry job is enqueued; FTS keeps working.
+        self.embed_note_chunks(&note_id);
         Ok(note_id)
+    }
+
+    /// Embed all un-embedded chunks of a note. Never fails the upsert.
+    fn embed_note_chunks(&self, note_id: &str) {
+        let embed_result = (|| -> Result<(), Box<dyn std::error::Error>> {
+            let provider = crate::models::select_provider(&crate::models::ModelSettings::load(
+                &self.conn,
+            ))?;
+            let mut stmt = self.conn.prepare(
+                "SELECT id, text FROM chunks WHERE note_id = ?1 AND embedding IS NULL ORDER BY ordinal",
+            )?;
+            let rows: Vec<(String, String)> = stmt
+                .query_map(params![note_id], |r| Ok((r.get(0)?, r.get(1)?)))?
+                .collect::<Result<_, _>>()?;
+            if rows.is_empty() {
+                return Ok(());
+            }
+            let texts: Vec<String> = rows.iter().map(|(_, t)| t.clone()).collect();
+            let vectors = provider.embed(&texts)?;
+            for ((id, _), vec) in rows.iter().zip(vectors.iter()) {
+                self.conn.execute(
+                    "UPDATE chunks SET embedding = ?2 WHERE id = ?1",
+                    params![id, vector_to_blob(vec)],
+                )?;
+            }
+            Ok(())
+        })();
+
+        if let Err(e) = embed_result {
+            crate::utils::logging::log(
+                crate::utils::logging::Level::Warn,
+                "index",
+                "embedding failed; chunks remain searchable via FTS",
+                serde_json::json!({ "error": e.to_string() }),
+            );
+            let _ = crate::jobs::enqueue(
+                &self.conn,
+                crate::jobs::JobKind::IndexNote,
+                serde_json::json!({ "note_id": note_id, "reason": "embed_retry" }),
+            );
+        }
     }
 
     /// Delete a note and its chunks (cascades FTS via triggers). Claims are

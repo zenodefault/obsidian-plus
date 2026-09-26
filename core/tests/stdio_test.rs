@@ -269,6 +269,27 @@ fn vault_sync_round_trip_over_stdio() {
     assert_eq!(dupes.len(), 1, "exact duplicate pair detected");
     assert_eq!(health["total_notes"], 3, "duplicates are reported, never deleted");
 
+    // Hybrid search (Part 5): score_breakdown present with the default
+    // provider; models.status reports the provider and embed coverage.
+    let reply = core2.request(&Envelope::request(
+        "t13",
+        "search.query",
+        json!({"query": "hello world", "limit": 5}),
+    ));
+    let hits = reply.result.expect("search result")["hits"].as_array().unwrap().clone();
+    assert!(!hits.is_empty());
+    assert!(
+        hits[0]["score_breakdown"].is_object(),
+        "hybrid hits carry a breakdown"
+    );
+
+    let reply = core2.request(&Envelope::request("t14", "models.status", json!({})));
+    let status = reply.result.expect("models.status result");
+    assert_eq!(status["provider"], "hash");
+    assert_eq!(status["chunks_total"], status["chunks_embedded"]);
+    assert_eq!(status["chunks_pending"], 0);
+    assert!(status["validation_error"].is_null());
+
     core2
         .request(&Envelope::request("t2", "core.shutdown", json!({})));
 }

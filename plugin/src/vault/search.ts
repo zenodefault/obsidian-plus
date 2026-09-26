@@ -3,7 +3,7 @@
  * UI surfaces consume this — never raw protocol envelopes (§33, §34).
  */
 
-import type { SearchHit, SearchQueryResult } from "./types";
+import type { ModelStatus, SearchHit, SearchQueryResult } from "./types";
 
 /** Hard cap shared with the core's dispatch (§94: bounded responses). */
 export const MAX_SEARCH_LIMIT = 100;
@@ -12,7 +12,7 @@ export interface SearchClient {
   request<T>(method: string, params?: unknown, timeoutMs?: number): Promise<T>;
 }
 
-/** Run a keyword search. Empty/whitespace queries return no hits. */
+/** Run a hybrid search. Empty/whitespace queries return no hits. */
 export async function searchQuery(
   client: SearchClient,
   query: string,
@@ -26,4 +26,9 @@ export async function searchQuery(
     limit: capped,
   });
   return result.hits;
+}
+
+/** Fetch local model status (§74): provider, coverage, validation errors. */
+export async function modelsStatus(client: SearchClient): Promise<ModelStatus> {
+  return client.request<ModelStatus>("models.status", {});
 }

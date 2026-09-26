@@ -71,6 +71,23 @@ export interface SearchHit {
   snippet: string;
   /** Higher is better. */
   score: number;
+  /** Per-signal hybrid scores; absent on lexical-only fallback (§76). */
+  score_breakdown?: {
+    lexical: number;
+    semantic: number;
+    entity: number;
+  };
+}
+
+export interface ModelStatus {
+  provider: string;
+  model_path?: string;
+  binary_path?: string;
+  dimension: number;
+  chunks_total: number;
+  chunks_embedded: number;
+  chunks_pending: number;
+  validation_error?: string;
 }
 
 export interface SearchQueryResult {

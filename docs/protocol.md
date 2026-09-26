@@ -61,6 +61,7 @@ Rules:
 | `vault.rebuild` | `{}` | `{ cleared, message }` |
 | `search.query` | `{ query, limit?: usize ≤ 100 }` | `{ hits: [{note_id, note_path, chunk_id, heading_path, snippet, score}], total_notes }` |
 | `health.summary` | `{}` | `{ total_notes, total_chunks, total_entities, total_claims, broken_links[], orphan_notes[], duplicate_candidates[], failed_jobs, pending_jobs }` |
+| `models.status` | `{}` | `{ provider, model_path?, binary_path?, dimension, chunks_total, chunks_embedded, chunks_pending, validation_error? }` |
 
 Lifecycle rules:
 
@@ -105,6 +106,19 @@ its claims (no source, no claim, §52).
 `health.summary` is detection-only (§68): broken links, orphans and exact
 duplicate candidates are reported and never acted upon (§69: never
 auto-delete).
+
+## Models & hybrid search (Part 5)
+
+The `ModelProvider` abstraction (§75) has two local implementations: `hash`
+(default — deterministic hashing embedder, no model files needed) and `cli`
+(a user-supplied llama.cpp-style binary with a user-supplied GGUF model —
+§74: validated up front, never downloaded). All processing is local (§96).
+
+`search.query` now runs hybrid ranking (§42, §44): lexical (FTS bm25,
+weight 0.5) + semantic (embedding cosine, 0.35) + entity overlap (0.15),
+merged deterministically. Hybrid hits carry `score_breakdown`; when the model
+is unavailable the response degrades to lexical-only hits **without**
+`score_breakdown` and search keeps working (§76).
 
 ## Framing constants
 

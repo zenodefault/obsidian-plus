@@ -177,8 +177,21 @@ pub struct SearchHitDto {
     pub chunk_id: String,
     pub heading_path: String,
     pub snippet: String,
-    /// BM25 relevance (higher is better; normalized client-side).
+    /// Hybrid relevance (higher is better).
     pub score: f64,
+    /// Per-signal breakdown (§44: inspectable ranking). Present when the
+    /// hybrid engine produced the hit; absent on lexical-only fallback.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub score_breakdown: Option<ScoreBreakdown>,
+}
+
+/// Per-signal hybrid scores (§44).
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub struct ScoreBreakdown {
+    pub lexical: f64,
+    pub semantic: f64,
+    pub entity: f64,
 }
 
 /// Result payload of `health.summary` (§68; UI §25 renders the categories).
