@@ -66,8 +66,8 @@ fn core_serves_health_unknown_and_malformed_then_shuts_down() {
     assert_eq!(result["status"], "ok");
     assert_eq!(result["protocol_version"], 1);
 
-    // 2. Unknown method → typed METHOD_NOT_FOUND (brain.ask is now real, Part 7).
-    let reply = core.request(&Envelope::request("r2", "agent.plan", json!({})));
+    // 2. Unknown method → typed METHOD_NOT_FOUND (agent.plan real since Part 8).
+    let reply = core.request(&Envelope::request("r2", "future.method", json!({})));
     let err = reply.error.expect("error");
     assert_eq!(err.code, ErrorCode::MethodNotFound);
     assert_eq!(err.request_id.as_deref(), Some("r2"));

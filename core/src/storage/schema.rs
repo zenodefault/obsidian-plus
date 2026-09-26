@@ -223,6 +223,19 @@ pub const MIGRATIONS: &[&str] = &[
     CREATE UNIQUE INDEX IF NOT EXISTS idx_rel_provenance
         ON relationships(source_entity_id, relationship_type, target_entity_id, source_note_id);
     "#,
+    // v4: agent & safety (§60, §85–86). Operations gain the columns the
+    // engine needs: per-file action, move target and content payloads (§66:
+    // audit keeps ids and outcomes only, payloads live here for rollback).
+    r#"
+    ALTER TABLE operation_files ADD COLUMN action TEXT NOT NULL DEFAULT 'edit';
+    ALTER TABLE operation_files ADD COLUMN new_path TEXT;
+    ALTER TABLE operation_files ADD COLUMN content TEXT;
+    ALTER TABLE operation_files ADD COLUMN old_content TEXT;
+
+    CREATE INDEX IF NOT EXISTS idx_operations_status ON operations(status);
+    CREATE INDEX IF NOT EXISTS idx_operation_files_op ON operation_files(operation_id);
+    CREATE INDEX IF NOT EXISTS idx_audit_created ON audit_events(created_at);
+    "#,
 ];
 
 /// Apply all pending migrations. The bookkeeping table is created inside an

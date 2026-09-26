@@ -9,10 +9,14 @@ use crate::protocol::{
     SyncCommitParams, SyncFinishParams, SyncNoteParams, CORE_VERSION, PROTOCOL_VERSION,
 };
 use crate::protocol::{
-    AskParams, ContradictionListResult, ContradictionResolveParams,
-    ContradictionResolveResult, HealthDuplicateDto, HealthFindingDto, HealthSummaryResult,
-    MemoryIdParams,
+    AgentCreateParams, AgentExecuteResult, AgentPlanResult, AgentPlanParams, AgentOperationResult,
+    AgentToolsResult, AgentVerifyResult, AskParams, AuditListParams, AuditListResult,
+    ContradictionListResult, ContradictionResolveParams, ContradictionResolveResult,
+    HealthDuplicateDto, HealthFindingDto, HealthSummaryResult, MemoryIdParams,
+    OperationExecuteParams, OperationIdParams, OperationListParams, OperationListResult,
+    OperationVerifyParams,
 };
+use crate::agent::AgentApiError;
 use crate::memory::MemoryApiError;
 use crate::vault::manager::{SyncManager, SyncNoteParams as NoteParamsView};
 use serde_json::Value;
@@ -76,6 +80,17 @@ pub fn dispatch(env: &Envelope, state: &Arc<DispatchState>, vault: &Arc<SyncMana
         "contradiction.list" => handle_contradiction_list(env, vault),
         "contradiction.resolve" => handle_contradiction_resolve(env, vault),
         "brain.ask" => handle_brain_ask(env, vault),
+        "agent.plan" => handle_agent_plan(env, vault),
+        "agent.create" => handle_agent_create(env, vault),
+        "agent.approve" => handle_agent_approve(env, vault),
+        "agent.reject" => handle_agent_reject(env, vault),
+        "agent.execute" => handle_agent_execute(env, vault),
+        "agent.verify" => handle_agent_verify(env, vault),
+        "agent.rollback" => handle_agent_rollback(env, vault),
+        "agent.tools" => handle_agent_tools(env, vault),
+        "operation.list" => handle_operation_list(env, vault),
+        "operation.get" => handle_operation_get(env, vault),
+        "activity.list" => handle_activity_list(env, vault),
         _ => {
             if env.id.is_some() {
                 let id = env.id.clone().unwrap_or_default();
@@ -382,6 +397,228 @@ fn handle_brain_ask(env: &Envelope, vault: &Arc<SyncManager>) -> Outcome {
     match vault.ask(&params.query, params.limit) {
         Ok(result) => ok(&id, serde_json::to_value(result).unwrap_or(Value::Null)),
         Err(err) => Outcome::Reply(Envelope::failure(id.clone(), err.with_request_id(id))),
+    }
+}
+
+fn agent_err(id: &str, e: AgentApiError) -> Outcome {
+    let (code, message, details) = match e {
+        AgentApiError::NotFound(op) => (
+            ErrorCode::InvalidParams,
+            format!("operation not found: {op}"),
+            Value::Null,
+        ),
+        AgentApiError::Invalid(m) => (ErrorCode::InvalidParams, m, Value::Null),
+        AgentApiError::PermissionDenied(m) => (ErrorCode::PermissionDenied, m, Value::Null),
+        AgentApiError::VersionConflict { path, expected, actual } => (
+            ErrorCode::FileVersionConflict,
+            "a file changed since the operation was prepared".to_string(),
+            serde_json::json!({ "path": path, "expected": expected, "actual": actual }),
+        ),
+        AgentApiError::Db(e) => (
+            ErrorCode::Internal,
+            format!("database error: {e}"),
+            Value::Null,
+        ),
+    };
+    Outcome::Reply(Envelope::failure(
+        id.to_string(),
+        RpcError::new(code, message).with_details(details).with_request_id(id),
+    ))
+}
+
+fn handle_agent_plan(env: &Envelope, vault: &Arc<SyncManager>) -> Outcome {
+    let Some(id) = env.id.clone() else { return Outcome::NoReply };
+    let params: AgentPlanParams =
+        match serde_json::from_value(env.params.clone().unwrap_or(Value::Null)) {
+            Ok(p) => p,
+            Err(e) => return invalid_params(&id, e),
+        };
+    match vault.agent_plan(&params) {
+        Ok(plan) => ok(&id, serde_json::to_value(AgentPlanResult { plan }).unwrap_or(Value::Null)),
+        Err(e) => agent_err(&id, e),
+    }
+}
+
+fn handle_agent_create(env: &Envelope, vault: &Arc<SyncManager>) -> Outcome {
+    let Some(id) = env.id.clone() else { return Outcome::NoReply };
+    let params: AgentCreateParams =
+        match serde_json::from_value(env.params.clone().unwrap_or(Value::Null)) {
+            Ok(p) => p,
+            Err(e) => return invalid_params(&id, e),
+        };
+    match vault.agent_create(&params.request, params.files) {
+        Ok(op) => ok(
+            &id,
+            serde_json::to_value(AgentOperationResult { operation: op }).unwrap_or(Value::Null),
+        ),
+        Err(e) => agent_err(&id, e),
+    }
+}
+
+fn handle_agent_approve(env: &Envelope, vault: &Arc<SyncManager>) -> Outcome {
+    let Some(id) = env.id.clone() else { return Outcome::NoReply };
+    let op_id = match serde_json::from_value::<OperationIdParams>(env.params.clone().unwrap_or(Value::Null)) {
+        Ok(p) => p.id,
+        Err(e) => return invalid_params(&id, e),
+    };
+    match vault.agent_approve(&op_id) {
+        Ok(op) => ok(
+            &id,
+            serde_json::to_value(AgentOperationResult { operation: op }).unwrap_or(Value::Null),
+        ),
+        Err(e) => agent_err(&id, e),
+    }
+}
+
+fn handle_agent_reject(env: &Envelope, vault: &Arc<SyncManager>) -> Outcome {
+    let Some(id) = env.id.clone() else { return Outcome::NoReply };
+    let op_id = match serde_json::from_value::<OperationIdParams>(env.params.clone().unwrap_or(Value::Null)) {
+        Ok(p) => p.id,
+        Err(e) => return invalid_params(&id, e),
+    };
+    match vault.agent_reject(&op_id) {
+        Ok(op) => ok(
+            &id,
+            serde_json::to_value(AgentOperationResult { operation: op }).unwrap_or(Value::Null),
+        ),
+        Err(e) => agent_err(&id, e),
+    }
+}
+
+fn handle_agent_execute(env: &Envelope, vault: &Arc<SyncManager>) -> Outcome {
+    let Some(id) = env.id.clone() else { return Outcome::NoReply };
+    let params: OperationExecuteParams =
+        match serde_json::from_value(env.params.clone().unwrap_or(Value::Null)) {
+            Ok(p) => p,
+            Err(e) => return invalid_params(&id, e),
+        };
+    let current: Vec<(String, String)> = params
+        .current
+        .into_iter()
+        .map(|ph| (ph.path, ph.hash))
+        .collect();
+    match vault.agent_execute(&params.id, &current) {
+        Ok((operation, apply)) => ok(
+            &id,
+            serde_json::to_value(AgentExecuteResult { operation, apply }).unwrap_or(Value::Null),
+        ),
+        Err(e) => agent_err(&id, e),
+    }
+}
+
+fn handle_agent_verify(env: &Envelope, vault: &Arc<SyncManager>) -> Outcome {
+    let Some(id) = env.id.clone() else { return Outcome::NoReply };
+    let params: OperationVerifyParams =
+        match serde_json::from_value(env.params.clone().unwrap_or(Value::Null)) {
+            Ok(p) => p,
+            Err(e) => return invalid_params(&id, e),
+        };
+    let applied: Vec<(String, String)> = params
+        .applied
+        .into_iter()
+        .map(|ph| (ph.path, ph.hash))
+        .collect();
+    match vault.agent_verify(&params.id, &applied) {
+        Ok(message) => ok(
+            &id,
+            serde_json::to_value(AgentVerifyResult { message }).unwrap_or(Value::Null),
+        ),
+        Err(e) => agent_err(&id, e),
+    }
+}
+
+fn handle_agent_rollback(env: &Envelope, vault: &Arc<SyncManager>) -> Outcome {
+    let Some(id) = env.id.clone() else { return Outcome::NoReply };
+    let params: OperationExecuteParams =
+        match serde_json::from_value(env.params.clone().unwrap_or(Value::Null)) {
+            Ok(p) => p,
+            Err(e) => return invalid_params(&id, e),
+        };
+    let current: Vec<(String, String)> = params
+        .current
+        .into_iter()
+        .map(|ph| (ph.path, ph.hash))
+        .collect();
+    match vault.agent_rollback(&params.id, &current) {
+        Ok((operation, apply)) => ok(
+            &id,
+            serde_json::to_value(AgentExecuteResult { operation, apply }).unwrap_or(Value::Null),
+        ),
+        Err(e) => agent_err(&id, e),
+    }
+}
+
+fn handle_agent_tools(env: &Envelope, vault: &Arc<SyncManager>) -> Outcome {
+    let Some(id) = env.id.clone() else { return Outcome::NoReply };
+    let tools = vault.agent_tools();
+    ok(
+        &id,
+        serde_json::to_value(AgentToolsResult { tools }).unwrap_or(Value::Null),
+    )
+}
+
+fn handle_operation_list(env: &Envelope, vault: &Arc<SyncManager>) -> Outcome {
+    let Some(id) = env.id.clone() else { return Outcome::NoReply };
+    let params: OperationListParams =
+        match serde_json::from_value(env.params.clone().unwrap_or(Value::Null)) {
+            Ok(p) => p,
+            Err(e) => return invalid_params(&id, e),
+        };
+    match vault.operations_list() {
+        Ok(mut ops) => {
+            if let Some(limit) = params.limit {
+                ops.truncate(limit);
+            }
+            ok(
+                &id,
+                serde_json::to_value(OperationListResult { operations: ops }).unwrap_or(Value::Null),
+            )
+        }
+        Err(e) => Outcome::Reply(
+            Envelope::failure(id.clone(), RpcError::new(ErrorCode::Internal, format!("database error: {e}")).with_request_id(id)),
+        ),
+    }
+}
+
+fn handle_operation_get(env: &Envelope, vault: &Arc<SyncManager>) -> Outcome {
+    let Some(id) = env.id.clone() else { return Outcome::NoReply };
+    let op_id = match serde_json::from_value::<OperationIdParams>(env.params.clone().unwrap_or(Value::Null)) {
+        Ok(p) => p.id,
+        Err(e) => return invalid_params(&id, e),
+    };
+    match vault.operation_get(&op_id) {
+        Ok(Some(operation)) => ok(
+            &id,
+            serde_json::to_value(AgentOperationResult { operation }).unwrap_or(Value::Null),
+        ),
+        Ok(None) => Outcome::Reply(
+            Envelope::failure(
+                id.clone(),
+                RpcError::new(ErrorCode::InvalidParams, format!("operation not found: {op_id}"))
+                    .with_request_id(id),
+            ),
+        ),
+        Err(e) => Outcome::Reply(
+            Envelope::failure(id.clone(), RpcError::new(ErrorCode::Internal, format!("database error: {e}")).with_request_id(id)),
+        ),
+    }
+}
+
+fn handle_activity_list(env: &Envelope, vault: &Arc<SyncManager>) -> Outcome {
+    let Some(id) = env.id.clone() else { return Outcome::NoReply };
+    let params: AuditListParams =
+        match serde_json::from_value(env.params.clone().unwrap_or(Value::Null)) {
+            Ok(p) => p,
+            Err(e) => return invalid_params(&id, e),
+        };
+    match vault.audit_list(params.limit.unwrap_or(100)) {
+        Ok((events, chain_valid)) => ok(
+            &id,
+            serde_json::to_value(AuditListResult { events, chain_valid }).unwrap_or(Value::Null),
+        ),
+        Err(e) => Outcome::Reply(
+            Envelope::failure(id.clone(), RpcError::new(ErrorCode::Internal, format!("database error: {e}")).with_request_id(id)),
+        ),
     }
 }
 

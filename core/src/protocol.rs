@@ -197,6 +197,27 @@ pub struct ScoreBreakdown {
 // ---- Reasoning protocol types (§56–58, §87) — re-exported from the engine.
 pub use crate::reasoning::{AskParams, AskResult, AskSource, QueryType};
 
+// ---- Agent protocol types (§59–66) — re-exported from the agent engine.
+pub use crate::agent::{
+    ApplyFile, AuditEvent, Operation, Plan as AgentPlan, PlanParams as AgentPlanParams,
+};
+
+/// Path + current-content-hash pair the plugin reports for version checks
+/// (§64: the core never reads the vault; the plugin vouches for state).
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub struct PathHash {
+    pub path: String,
+    pub hash: String,
+}
+
+pub fn path_hashes(pairs: &[(String, String)]) -> Vec<PathHash> {
+    pairs
+        .iter()
+        .map(|(p, h)| PathHash { path: p.clone(), hash: h.clone() })
+        .collect()
+}
+
 // ---- Memory protocol types (§49–55) — re-exported from the memory engine.
 pub use crate::memory::{
     ContradictionEntry, ClaimRef, MemoryEntry, MemorySource, Resolution,
@@ -256,6 +277,103 @@ pub struct MemoryEntryResult {
 #[serde(deny_unknown_fields)]
 pub struct MemoryListResult {
     pub memories: Vec<MemoryEntry>,
+}
+
+// ---- Agent result wrappers (§59–66) ----
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub struct AgentPlanResult {
+    pub plan: AgentPlan,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
+#[serde(deny_unknown_fields, default)]
+pub struct AgentCreateParams {
+    pub request: String,
+    pub files: Vec<crate::agent::AgentFileInput>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub struct AgentOperationResult {
+    pub operation: Operation,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
+#[serde(deny_unknown_fields, default)]
+pub struct OperationIdParams {
+    pub id: String,
+}
+
+/// Params of `agent.execute` / `agent.rollback`: the plugin's attested
+/// current path→hash state for the files involved (§64).
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
+#[serde(deny_unknown_fields, default)]
+pub struct OperationExecuteParams {
+    pub id: String,
+    pub current: Vec<PathHash>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub struct AgentExecuteResult {
+    pub operation: Operation,
+    pub apply: Vec<ApplyFile>,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
+#[serde(deny_unknown_fields, default)]
+pub struct OperationVerifyParams {
+    pub id: String,
+    pub applied: Vec<PathHash>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub struct AgentVerifyResult {
+    pub message: String,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
+#[serde(deny_unknown_fields, default)]
+pub struct OperationListParams {
+    pub limit: Option<usize>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub struct OperationListResult {
+    pub operations: Vec<Operation>,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
+#[serde(deny_unknown_fields, default)]
+pub struct AuditListParams {
+    pub limit: Option<usize>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub struct AuditListResult {
+    pub events: Vec<AuditEvent>,
+    pub chain_valid: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub struct AgentToolsResult {
+    pub tools: Vec<AgentToolDto>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub struct AgentToolDto {
+    pub name: String,
+    pub permission: String,
+    /// allow | confirm | denied (§61 default matrix).
+    pub decision: String,
+    pub mutates: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]

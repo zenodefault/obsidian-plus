@@ -69,6 +69,15 @@ Rules:
 | `contradiction.list` | `{}` | `{ contradictions: [{id, kind, status, claim_a, claim_b, created_at}] }` |
 | `contradiction.resolve` | `{ id, resolution: keep_both\|mark_later_current\|ignore }` | `{ message }` |
 | `brain.ask` | `{ query, limit?: usize 1..=20 }` | `{ answer, query_type, confidence, answer_mode, sources: [{note_id, note_path, chunk_id, heading_path, snippet, score}], memories: MemoryEntry[], contradictions: [...] }` |
+| `agent.plan` | `{ request, link_target?, merge_paths?, merge_target? }` | `{ plan: { goal, files: [{path, action, content?, old_content?, new_path?}], rationale[] } }` — proposal only |
+| `agent.create` | `{ request, files: [{path, action: create\|edit\|move, content?, old_content?, new_path?}] }` | `{ operation }` (approval_status `pending`) |
+| `agent.approve` / `agent.reject` | `{ id }` | `{ operation }` |
+| `agent.execute` | `{ id, current: [{path, hash}] }` | `{ operation, apply: [{path, action, content?, new_path?}] }` — version-checked (§64) |
+| `agent.verify` | `{ id, applied: [{path, hash}] }` | `{ message }` |
+| `agent.rollback` | `{ id, current: [{path, hash}] }` | `{ operation, apply: [reverse instructions] }` — §65 |
+| `agent.tools` | `{}` | `{ tools: [{name, permission, decision: allow\|confirm\|denied, mutates}] }` |
+| `operation.list` / `operation.get` | `{ limit? }` / `{ id }` | `{ operations }` / `{ operation }` |
+| `activity.list` | `{ limit? }` | `{ events: AuditEvent[], chain_valid: bool }` |
 
 Lifecycle rules:
 
@@ -172,6 +181,41 @@ citation validation → answer.
     vault."
 - **Confidence** is deterministic from retrieval quality (0.0 with no
   evidence, capped at 0.95).
+
+## Agent & safety (Part 8)
+
+Every state-changing action is a **structured operation** (§62): prepared →
+previewed → explicitly approved → version-checked execution → verified →
+rollback-able → audited. The full §59 pipeline, with the policy engine (§61)
+enforcing it deterministically — the model never touches the permission path
+(Rule 6, §67, Rule 7).
+
+- **Policy (§61)**: reads/searches/memory-proposals are `allow`; vault
+  create/modify/move and memory writes are `confirm` (approval of a previewed
+  operation); `vault.delete` is `denied` outright — agent delete requests are
+  refused at prepare time with `PERMISSION_DENIED` (§103: unauthorized
+  state-changing actions = 0). There is no API to change the matrix.
+- **Planner (§59)**: deterministic strategies (link suggestions, merges,
+  missing-title metadata), each grounded in indexed state; ungrounded write
+  intents are refused. Merges never delete sources (Rule 9). Planning never
+  mutates anything.
+- **Version safety (§64)**: the core never reads the vault (§89), so the
+  plugin attests current path→hash pairs with `agent.execute`. Any mismatch
+  with the prepare-time hashes aborts the WHOLE operation — no partial
+  application — with `FILE_VERSION_CONFLICT`.
+- **Rollback (§65)**: allowed only while every file still matches the
+  operation's post-state (plugin attests again). Emits reverse instructions:
+  edit → restore pre-state content, create → delete the created file, move →
+  move back. Newer manual changes are never overwritten.
+- **Verification**: after applying, the plugin reports post-apply hashes via
+  `agent.verify`; mismatches are recorded as `operation.verify_failed` in the
+  audit and surfaced to the caller.
+- **Audit (§66)**: hash-chained append-only log (actor, reason, target,
+  approval, result). `activity.list` returns the trail plus `chain_valid`; a
+  tampered row breaks verification (security test §99).
+- **Apply boundary**: `agent.execute` returns per-file instructions; the
+  **plugin** applies them through Obsidian's vault API and reports hashes
+  back. The core never writes to the vault (§4.2).
 
 ## Framing constants
 

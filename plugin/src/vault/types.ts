@@ -173,6 +173,79 @@ export interface AskResult {
   contradictions: ContradictionEntry[];
 }
 
+// ---- Agent & safety (§59–66) ----
+
+export type AgentFileAction = "create" | "edit" | "move";
+
+export interface AgentFileInput {
+  path: string;
+  action: AgentFileAction;
+  content?: string;
+  old_content?: string;
+  new_path?: string;
+}
+
+export interface AgentPlan {
+  goal: string;
+  files: AgentFileInput[];
+  rationale: string[];
+}
+
+export interface AgentFile {
+  path: string;
+  action: string;
+  note_id?: string;
+  old_hash?: string;
+  new_hash?: string;
+  new_path?: string;
+  content?: string;
+  old_content?: string;
+}
+
+export interface AgentOperation {
+  id: string;
+  run_id?: string;
+  reason: string;
+  risk_level: string;
+  approval_status: "pending" | "approved" | "rejected";
+  status: "pending" | "executed" | "rolled_back" | "rejected";
+  created_at: number;
+  completed_at?: number;
+  files: AgentFile[];
+}
+
+export interface ApplyFile {
+  path: string;
+  action: string;
+  content?: string;
+  new_path?: string;
+}
+
+export interface PathHash {
+  path: string;
+  hash: string;
+}
+
+export interface AuditEvent {
+  id: string;
+  operation_id?: string;
+  actor: string;
+  reason?: string;
+  target?: string;
+  approval?: string;
+  result: string;
+  previous_hash?: string;
+  new_hash: string;
+  created_at: number;
+}
+
+export interface AgentTool {
+  name: string;
+  permission: string;
+  decision: "allow" | "confirm" | "denied";
+  mutates: boolean;
+}
+
 export type ContradictionResolution = "keep_both" | "mark_later_current" | "ignore";
 
 export interface SearchQueryResult {

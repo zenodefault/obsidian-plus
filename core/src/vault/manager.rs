@@ -584,6 +584,92 @@ impl SyncManager {
         let limit = limit.unwrap_or(crate::reasoning::DEFAULT_CONTEXT_LIMIT);
         crate::reasoning::answer(&self.index, provider.as_ref(), query, limit).map_err(db_err)
     }
+
+    // ---- Agent & safety API (§59–66) ----
+
+    /// `agent.plan` — deterministic proposal; nothing is applied.
+    pub fn agent_plan(
+        &self,
+        params: &crate::agent::PlanParams,
+    ) -> Result<crate::agent::Plan, crate::agent::AgentApiError> {
+        crate::agent::planner::plan(self.index.connection(), params)
+    }
+
+    /// `agent.create` — wrap proposed file changes into a previewed operation.
+    pub fn agent_create(
+        &self,
+        request: &str,
+        files: Vec<crate::agent::AgentFileInput>,
+    ) -> Result<crate::agent::Operation, crate::agent::AgentApiError> {
+        crate::agent::operations::prepare(self.index.connection(), request, None, files)
+    }
+
+    /// `agent.approve`.
+    pub fn agent_approve(&self, id: &str) -> Result<crate::agent::Operation, crate::agent::AgentApiError> {
+        crate::agent::operations::approve(self.index.connection(), id)
+    }
+
+    /// `agent.reject`.
+    pub fn agent_reject(&self, id: &str) -> Result<crate::agent::Operation, crate::agent::AgentApiError> {
+        crate::agent::operations::reject(self.index.connection(), id)
+    }
+
+    /// `agent.execute` — version-checked (§64); returns apply instructions.
+    pub fn agent_execute(
+        &self,
+        id: &str,
+        current: &[(String, String)],
+    ) -> Result<(crate::agent::Operation, Vec<crate::agent::ApplyFile>), crate::agent::AgentApiError> {
+        crate::agent::operations::execute(self.index.connection(), id, current)
+    }
+
+    /// `agent.verify` — record the plugin's post-apply hashes (§59).
+    pub fn agent_verify(&self, id: &str, applied: &[(String, String)]) -> Result<String, crate::agent::AgentApiError> {
+        crate::agent::operations::verify_applied(self.index.connection(), id, applied)
+    }
+
+    /// `agent.rollback` — §65; emits reverse instructions.
+    pub fn agent_rollback(
+        &self,
+        id: &str,
+        current: &[(String, String)],
+    ) -> Result<(crate::agent::Operation, Vec<crate::agent::ApplyFile>), crate::agent::AgentApiError> {
+        crate::agent::operations::rollback(self.index.connection(), id, current)
+    }
+
+    /// `operation.list` / `operation.get`.
+    pub fn operations_list(&self) -> Result<Vec<crate::agent::Operation>, rusqlite::Error> {
+        crate::agent::operations::list(self.index.connection())
+    }
+
+    pub fn operation_get(&self, id: &str) -> Result<Option<crate::agent::Operation>, rusqlite::Error> {
+        crate::agent::operations::load(self.index.connection(), id)
+    }
+
+    /// `activity.list` — audit trail + chain verification (§66).
+    pub fn audit_list(&self, limit: usize) -> Result<(Vec<crate::agent::AuditEvent>, bool), rusqlite::Error> {
+        let events = crate::agent::audit::list(self.index.connection(), limit)?;
+        let valid = crate::agent::audit::verify_chain(self.index.connection())?;
+        Ok((events, valid))
+    }
+
+    /// `agent.tools` — the §60 registry with the §61 default matrix.
+    pub fn agent_tools(&self) -> Vec<crate::protocol::AgentToolDto> {
+        crate::agent::TOOLS
+            .iter()
+            .map(|t| crate::protocol::AgentToolDto {
+                name: t.name.to_string(),
+                permission: t.permission.as_str().to_string(),
+                decision: match crate::agent::PolicyEngine::decision(t.permission) {
+                    crate::agent::Decision::Allow => "allow",
+                    crate::agent::Decision::Confirm => "confirm",
+                    crate::agent::Decision::Denied => "denied",
+                }
+                .to_string(),
+                mutates: t.mutates,
+            })
+            .collect()
+    }
 }
 
 fn no_session() -> RpcError {
