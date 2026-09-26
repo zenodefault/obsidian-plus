@@ -5,4 +5,6 @@ pub mod dispatch;
 pub mod ipc;
 pub mod protocol;
 pub mod server;
+pub mod storage;
 pub mod utils;
+pub mod vault;

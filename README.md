@@ -21,7 +21,7 @@ Implementation follows the workstream order in [PLAN.md](PLAN.md) (UI/UX workstr
 | Part | Scope | Status |
 |------|-------|--------|
 | 1 — Foundation | repo skeleton, typed protocol, IPC, core lifecycle, plugin daemon client | ✅ |
-| 2 — Vault Bridge | vault sync, hashing, note identity, rebuild | ⬜ |
+| 2 — Vault Bridge | vault sync, hashing, note identity, rebuild | ✅ |
 | 3 — Storage & Index | SQLite, FTS5, chunking, embeddings, vector search | ⬜ |
 | 4 — Knowledge | entities, claims, relationships, provenance | ⬜ |
 | 5 — Model Runtime | local GGUF runtime, hybrid retrieval | ⬜ |

@@ -52,6 +52,13 @@ Rules:
 |--------|--------|--------|
 | `core.health` | `{}` | `{ status, version, protocol_version, pid }` |
 | `core.shutdown` | `{}` | `{ shutting_down: true }` — core replies, then exits 0 |
+| `vault.sync.begin` | `{ rebuild?: bool }` | `{ session_id, rebuild }` |
+| `vault.sync.batch` | `{ session_id, notes: [{path, hash, mtime, size}] }` | `{ received }` |
+| `vault.sync.commit` | `{ session_id }` | `{ added, modified, renamed: [{from,to}], deleted, to_fetch, applied }` |
+| `vault.sync.note` | `{ session_id, path, hash, mtime, size, content }` | `{ path, note_id, updated }` |
+| `vault.sync.finish` | `{ session_id }` | `{ total_notes, persisted }` |
+| `vault.state.get` | `{ include_metadata?: bool }` | `{ total_notes, notes: [{note_id, path, content_hash, title?, tags?}] }` |
+| `vault.rebuild` | `{}` | `{ cleared, message }` |
 
 Lifecycle rules:
 
@@ -59,6 +66,23 @@ Lifecycle rules:
 - Core exits after answering `core.shutdown`.
 - Unknown notifications (no `id`) are silently ignored, per JSON-RPC convention.
 - Malformed lines produce a `PARSE_ERROR` reply and **do not** terminate the server.
+
+## Vault sync flow (Part 2)
+
+```text
+plugin                          core
+  │ vault.sync.begin ──────────▶ open session (wipe state if rebuild)
+  │ vault.sync.batch × n ──────▶ record inventory (path, hash, mtime, size)
+  │ vault.sync.commit ─────────▶ diff vs state, detect renames, apply deletes
+  │◀───── { added, modified, renamed, deleted, to_fetch }
+  │ vault.sync.note × k ───────▶ verify hash, extract metadata, assign note_id
+  │ vault.sync.finish ─────────▶ validate completeness, persist atomically
+```
+
+Note identity: `note_id` is a UUID minted on first content upload and kept
+forever. A rename (same content hash at a new path, with the old path gone)
+carries identity over and needs **no** re-upload. The core never reads or
+writes the vault; the plugin is the sole source of content (§89).
 
 ## Framing constants
 

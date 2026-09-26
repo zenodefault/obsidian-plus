@@ -7,10 +7,12 @@ use crate::dispatch::{dispatch, DispatchState, Outcome};
 use crate::ipc::{self, FrameError};
 use crate::protocol::ErrorCode;
 use crate::utils::logging::{self, Level};
+use crate::vault::manager::SyncManager;
 use std::io::{BufReader, Write};
+use std::sync::Arc;
 
 /// Serve requests until EOF or shutdown. Returns when the server should stop.
-pub fn serve<R: std::io::Read, W: Write>(input: R, output: W) {
+pub fn serve<R: std::io::Read, W: Write>(input: R, output: W, vault: Arc<SyncManager>) {
     let mut reader = BufReader::new(input);
     let mut writer = output;
     let state = DispatchState::new();
@@ -28,7 +30,7 @@ pub fn serve<R: std::io::Read, W: Write>(input: R, output: W) {
             Ok(Some(env)) => {
                 let id_for_log = env.id.clone().unwrap_or_default();
                 let method_for_log = env.method.clone().unwrap_or_default();
-                match dispatch(&env, &state) {
+                match dispatch(&env, &state, &vault) {
                     Outcome::Reply(reply) => {
                         if let Err(e) = ipc::write_envelope(&mut writer, &reply) {
                             logging::log(Level::Error, "server", "write failed", serde_json::json!({

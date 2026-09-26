@@ -6,6 +6,7 @@
 use sovereign_core::config::Config;
 use sovereign_core::server;
 use sovereign_core::utils::logging::{self, Level};
+use sovereign_core::vault::manager::SyncManager;
 
 fn main() {
     logging::init(Level::Info);
@@ -24,9 +25,10 @@ fn main() {
         "data_dir": config.data_dir.to_string_lossy(),
     }));
 
+    let vault = SyncManager::new(&config.data_dir);
     let stdin = std::io::stdin();
     let stdout = std::io::stdout();
-    server::serve(stdin.lock(), stdout.lock());
+    server::serve(stdin.lock(), stdout.lock(), vault);
 
     logging::log(Level::Info, "main", "core stopped", serde_json::json!({}));
 }

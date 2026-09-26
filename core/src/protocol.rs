@@ -143,3 +143,9 @@ pub struct ShutdownParams {}
 pub struct ShutdownResult {
     pub shutting_down: bool,
 }
+
+// Vault sync protocol types re-exported for dispatch convenience.
+pub use crate::vault::types::{
+    RebuildParams, RebuildResult, StateGetParams, SyncBatchParams, SyncBeginParams,
+    SyncCommitParams, SyncFinishParams, SyncNote, SyncNoteParams,
+};

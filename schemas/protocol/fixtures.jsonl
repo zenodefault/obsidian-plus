@@ -6,3 +6,7 @@
 {"name": "notification_no_id", "valid": true, "wire": {"method": "core.shutdown", "params": {}}}
 {"name": "response_health_result", "valid": true, "wire": {"id": "req_123", "result": {"status": "ok", "version": "0.1.0", "protocol_version": 1, "pid": 4242}}}
 {"name": "response_error_shape", "valid": true, "wire": {"id": "req_124", "error": {"code": "METHOD_NOT_FOUND", "message": "unknown method: brain.ask", "details": {"method": "brain.ask"}, "request_id": "req_124"}}}
+{"name": "request_vault_sync_begin", "valid": true, "wire": {"id": "req_130", "method": "vault.sync.begin", "params": {"rebuild": false}}}
+{"name": "request_vault_sync_commit", "valid": true, "wire": {"id": "req_131", "method": "vault.sync.commit", "params": {"session_id": "0b8f4c1e-0000-4000-8000-000000000000"}}}
+{"name": "response_vault_sync_commit", "valid": true, "wire": {"id": "req_131", "result": {"added": ["A.md"], "modified": [], "renamed": [], "deleted": [], "to_fetch": ["A.md"], "applied": 0}}}
+{"name": "request_vault_sync_note", "valid": true, "wire": {"id": "req_132", "method": "vault.sync.note", "params": {"session_id": "0b8f4c1e-0000-4000-8000-000000000000", "path": "A.md", "hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "mtime": 123, "size": 5, "content": "hello"}}}

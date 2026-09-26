@@ -22,11 +22,15 @@ impl CoreProc {
                 .subsec_nanos()
         ));
         std::fs::create_dir_all(&tmp).unwrap();
+        Self::spawn_in(&tmp)
+    }
 
+    /// Spawn with an explicit data dir (tests that exercise persistence).
+    fn spawn_in(dir: &std::path::Path) -> Self {
         let bin = env!("CARGO_BIN_EXE_sovereign-core");
         let child = Command::new(bin)
             .arg("--data-dir")
-            .arg(&tmp)
+            .arg(dir)
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::inherit())
@@ -102,6 +106,98 @@ fn core_serves_health_unknown_and_malformed_then_shuts_down() {
             None => std::thread::sleep(std::time::Duration::from_millis(20)),
         }
     }
+}
+
+#[test]
+fn vault_sync_round_trip_over_stdio() {
+    let shared_dir = std::env::temp_dir().join(format!(
+        "sovereign-persist-{}-{}",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .subsec_nanos()
+    ));
+    std::fs::create_dir_all(&shared_dir).unwrap();
+    let mut core = CoreProc::spawn_in(&shared_dir);
+
+    // Begin.
+    let reply = core.request(&Envelope::request(
+        "s1",
+        "vault.sync.begin",
+        json!({"rebuild": false}),
+    ));
+    let session = reply.result.expect("begin result")["session_id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+
+    // Batch: one new note.
+    let content = "# Hello\n\nWorld with [[Other]]. #tag\n";
+    let reply = core.request(&Envelope::request(
+        "s2",
+        "vault.sync.batch",
+        json!({
+            "session_id": session,
+            "notes": [{
+                "path": "Notes/Hello.md",
+                "hash": sovereign_core::vault::manager::hash_content(content),
+                "mtime": 123,
+                "size": content.len(),
+            }],
+        }),
+    ));
+    assert_eq!(reply.result.expect("batch result")["received"], 1);
+
+    // Commit: must request the note's content.
+    let reply = core.request(&Envelope::request(
+        "s3",
+        "vault.sync.commit",
+        json!({"session_id": session}),
+    ));
+    let result = reply.result.expect("commit result");
+    assert_eq!(result["added"][0], "Notes/Hello.md");
+    assert_eq!(result["to_fetch"][0], "Notes/Hello.md");
+
+    // Note upload with hash-verified content.
+    let reply = core.request(&Envelope::request(
+        "s4",
+        "vault.sync.note",
+        json!({
+            "session_id": session,
+            "path": "Notes/Hello.md",
+            "hash": sovereign_core::vault::manager::hash_content(content),
+            "mtime": 123,
+            "size": content.len(),
+            "content": content,
+        }),
+    ));
+    let note_id = reply.result.expect("note result")["note_id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    assert!(!note_id.is_empty());
+
+    // Finish.
+    let reply = core.request(&Envelope::request(
+        "s5",
+        "vault.sync.finish",
+        json!({"session_id": session}),
+    ));
+    let result = reply.result.expect("finish result");
+    assert_eq!(result["total_notes"], 1);
+    assert_eq!(result["persisted"], true);
+
+    // State readable in a *later process*: persistence actually persists.
+    drop(core);
+    let mut core2 = CoreProc::spawn_in(&shared_dir);
+    let reply = core2.request(&Envelope::request("t1", "vault.state.get", json!({"include_metadata": true})));
+    let state = reply.result.expect("state result");
+    assert_eq!(state["total_notes"], 1);
+    assert_eq!(state["notes"][0]["note_id"], json!(note_id));
+    assert_eq!(state["notes"][0]["title"], "Hello");
+    core2
+        .request(&Envelope::request("t2", "core.shutdown", json!({})));
 }
 
 #[test]
