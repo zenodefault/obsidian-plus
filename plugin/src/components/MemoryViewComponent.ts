@@ -1,6 +1,6 @@
 import { App, Notice } from "obsidian";
 import { MemoryItem, MemoryStatus } from "../types/protocol";
-import { mockService } from "../mock/mockData";
+import type { BrainDataService } from "../services/brainDataService";
 
 export class MemoryViewComponent {
   private containerEl: HTMLElement;
@@ -11,6 +11,7 @@ export class MemoryViewComponent {
   constructor(
     parentEl: HTMLElement,
     private app: App,
+    private brain: BrainDataService,
     private onMemoryUpdated?: () => void
   ) {
     this.containerEl = parentEl.createDiv({ cls: "sovereign-memory-view" });
@@ -53,7 +54,13 @@ export class MemoryViewComponent {
 
   async refresh(): Promise<void> {
     this.listEl.empty();
-    const allMemories = await mockService.getMemories();
+    let allMemories: MemoryItem[];
+    try {
+      allMemories = await this.brain.getMemories();
+    } catch (err) {
+      new Notice(`Could not load memories: ${err instanceof Error ? err.message : String(err)}`);
+      allMemories = [];
+    }
     const filtered = allMemories.filter((m) => m.status === this.currentTab);
 
     // Update tab counts
@@ -70,7 +77,12 @@ export class MemoryViewComponent {
 
     if (filtered.length === 0) {
       const emptyState = this.listEl.createDiv({ cls: "sovereign-empty-state" });
-      emptyState.createSpan({ text: `No ${this.currentTab} memories recorded.` });
+      emptyState.createSpan({
+        text:
+          this.currentTab === "pending"
+            ? "No memories awaiting review. Write first-person statements (\"I prefer…\", \"I decided…\") in your notes and sync."
+            : `No ${this.currentTab} memories recorded.`,
+      });
       return;
     }
 
@@ -97,7 +109,7 @@ export class MemoryViewComponent {
     const stmt = card.createDiv({ cls: "sovereign-card-body" });
     stmt.createEl("p", { text: `"${memory.statement}"`, cls: "sovereign-memory-text" });
 
-    // Provenance link
+    // Provenance link (real source note, §52)
     const provRow = card.createDiv({ cls: "sovereign-card-footer" });
     const sourceLink = provRow.createEl("a", {
       text: `Source: ${memory.source_path}`,
@@ -107,7 +119,7 @@ export class MemoryViewComponent {
       void this.app.workspace.openLinkText(memory.source_path, "", false);
     });
 
-    // Action triggers
+    // Action triggers — real protocol transitions (§50)
     const actions = provRow.createDiv({ cls: "sovereign-btn-group" });
     if (memory.status === "pending") {
       const acceptBtn = actions.createEl("button", {
@@ -115,8 +127,12 @@ export class MemoryViewComponent {
         cls: "mod-cta sovereign-btn-sm",
       });
       acceptBtn.addEventListener("click", async () => {
-        await mockService.setMemoryStatus(memory.id, "accepted");
-        new Notice("Memory accepted into sovereign knowledge store.");
+        try {
+          await this.brain.setMemoryStatus(memory.id, "accepted");
+          new Notice("Memory accepted into sovereign knowledge store.");
+        } catch (err) {
+          new Notice(`Accept failed: ${err instanceof Error ? err.message : String(err)}`);
+        }
         await this.refresh();
         this.onMemoryUpdated?.();
       });
@@ -126,8 +142,12 @@ export class MemoryViewComponent {
         cls: "mod-warning sovereign-btn-sm",
       });
       rejectBtn.addEventListener("click", async () => {
-        await mockService.setMemoryStatus(memory.id, "rejected");
-        new Notice("Memory rejected.");
+        try {
+          await this.brain.setMemoryStatus(memory.id, "rejected");
+          new Notice("Memory rejected.");
+        } catch (err) {
+          new Notice(`Reject failed: ${err instanceof Error ? err.message : String(err)}`);
+        }
         await this.refresh();
         this.onMemoryUpdated?.();
       });
@@ -137,8 +157,12 @@ export class MemoryViewComponent {
         cls: "sovereign-btn-sm sovereign-btn-secondary",
       });
       superBtn.addEventListener("click", async () => {
-        await mockService.setMemoryStatus(memory.id, "superseded");
-        new Notice("Memory marked as superseded.");
+        try {
+          await this.brain.setMemoryStatus(memory.id, "superseded");
+          new Notice("Memory marked as superseded.");
+        } catch (err) {
+          new Notice(`Update failed: ${err instanceof Error ? err.message : String(err)}`);
+        }
         await this.refresh();
         this.onMemoryUpdated?.();
       });

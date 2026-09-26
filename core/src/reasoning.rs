@@ -493,7 +493,8 @@ pub fn evidence_answer(ctx: &AssembledContext) -> String {
 
 /// Grounded generation prompt (§67: retrieved content is data, rules live in
 /// the system framing — and permissions are enforced outside the model).
-fn build_prompt(query: &str, ctx: &AssembledContext) -> String {
+#[doc(hidden)]
+pub fn build_prompt(query: &str, ctx: &AssembledContext) -> String {
     let mut p = String::new();
     p.push_str("You are the user's local Sovereign Brain. Answer strictly from the evidence below.\n");
     p.push_str("Rules:\n");

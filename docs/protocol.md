@@ -217,6 +217,37 @@ enforcing it deterministically — the model never touches the permission path
   **plugin** applies them through Obsidian's vault API and reports hashes
   back. The core never writes to the vault (§4.2).
 
+## Hardening & security (Part 9)
+
+The test suite (`core/tests/hardening_test.rs`) is the executable security
+case — every guarantee below is enforced by a test that fails loudly on
+regression (§96, §99):
+
+- **Network isolation (§96)**: static scans assert the core source and
+  `Cargo.toml` contain no HTTP/TCP clients or telemetry dependencies; the
+  only sanctioned subprocess spawn is the user-configured embedding binary.
+- **Corrupted database (§99)**: a garbage `brain.db` fails at any open stage
+  (pragmas included), is quarantined as `brain.db.corrupt-<ts>` (never
+  silently deleted, WAL/SHM sidecars removed) and the store rebuilds itself;
+  transient lock/busy errors are never classified as corruption.
+- **Corrupted vector data (§99)**: truncated/wrong-dimension embedding blobs
+  never panic retrieval; cosine treats mismatched dimensions as 0.0 and FTS
+  keeps answering.
+- **Prompt injection (§67)**: notes containing injected instructions remain
+  *content*; a model that "obeys" them loses its answer to §58 citation
+  validation, the prompt builder keeps instructions strictly before the
+  evidence data channel, and permission decisions stay outside the model.
+- **Permission escalation (§99)**: unapproved execution → `PERMISSION_DENIED`,
+  tampered hashes → `FILE_VERSION_CONFLICT`, deletes refused at prepare time;
+  malformed/oversized/unknown-field requests all fail closed with typed codes.
+- **Model failure (§76)**: broken model configs degrade search to lexical
+  (no breakdown) and answers to the evidence summary; the CLI provider's
+  output parser is strict — diagnostics from a misbehaving binary can never
+  masquerade as embeddings; model calls have no write path to the vault.
+- **Resource limits (§91, §92)**: 10 MB stdin cap rejects oversized lines
+  without buffering and the server keeps serving; 200-note indexing and
+  bounded retrieval complete within generous time bounds.
+
 ## Framing constants
 
 - `PROTOCOL_VERSION: 1` — bump on breaking changes; both sides reject mismatches loudly.

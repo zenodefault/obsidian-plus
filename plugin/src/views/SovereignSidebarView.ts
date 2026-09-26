@@ -1,5 +1,6 @@
 import { ItemView, WorkspaceLeaf, TFile } from "obsidian";
-import { mockService } from "../mock/mockData";
+import { RealBrainDataService, BrainDataService } from "../services/brainDataService";
+import { OperationService } from "../services/operationService";
 import { CurrentNoteContextCard } from "../components/CurrentNoteContextCard";
 import { AskViewComponent } from "../components/AskViewComponent";
 import { MemoryViewComponent } from "../components/MemoryViewComponent";
@@ -20,6 +21,12 @@ export type SovereignTab =
   | "Activity"
   | "Settings";
 
+/** Provide the brain service from the plugin's daemon (wired in main.ts). */
+export interface SidebarServices {
+  brain: BrainDataService;
+  operations: OperationService | null;
+}
+
 export class SovereignSidebarView extends ItemView {
   private activeTab: SovereignTab = "Ask";
   private contextCard!: CurrentNoteContextCard;
@@ -27,9 +34,16 @@ export class SovereignSidebarView extends ItemView {
   private navButtons: Map<SovereignTab, HTMLButtonElement> = new Map();
   private statusBarEl!: HTMLElement;
   private askComponent?: AskViewComponent;
+  private services: SidebarServices;
 
-  constructor(leaf: WorkspaceLeaf) {
+  constructor(leaf: WorkspaceLeaf, services?: SidebarServices) {
     super(leaf);
+    this.services =
+      services ??
+      ({
+        brain: new RealBrainDataService(() => null),
+        operations: null,
+      } satisfies SidebarServices);
   }
 
   getViewType(): string {
@@ -94,6 +108,7 @@ export class SovereignSidebarView extends ItemView {
     this.contextCard = new CurrentNoteContextCard(
       parentEl,
       this.app,
+      this.services.brain,
       (noteTitle: string) => {
         this.switchTab("Ask");
         this.askComponent?.setQuery(`Explain key concepts and connections in [[${noteTitle}]]`);
@@ -143,6 +158,7 @@ export class SovereignSidebarView extends ItemView {
         this.askComponent = new AskViewComponent(
           this.tabContentEl,
           this.app,
+          this.services.brain,
           () => this.switchTab("Memory")
         );
         break;
@@ -150,64 +166,97 @@ export class SovereignSidebarView extends ItemView {
         new MemoryViewComponent(
           this.tabContentEl,
           this.app,
+          this.services.brain,
           () => void this.updateStatusBar()
         );
         break;
       case "Inbox":
-        new InboxViewComponent(this.tabContentEl, this.app, (tab) =>
+        new InboxViewComponent(this.tabContentEl, this.app, this.services.brain, (tab) =>
           this.switchTab(tab as SovereignTab)
         );
         break;
       case "Actions":
-        new ActionsViewComponent(
-          this.tabContentEl,
-          this.app,
-          () => void this.updateStatusBar()
-        );
+        if (this.services.operations) {
+          new ActionsViewComponent(
+            this.tabContentEl,
+            this.app,
+            this.services.operations,
+            () => void this.updateStatusBar()
+          );
+        } else {
+          const empty = this.tabContentEl.createDiv({ cls: "sovereign-empty-state" });
+          empty.createSpan({ text: "Operations require a running core." });
+        }
         break;
       case "Brain Health":
-        new BrainHealthComponent(this.tabContentEl, this.app, (tab) =>
+        new BrainHealthComponent(this.tabContentEl, this.app, this.services.brain, (tab) =>
           this.switchTab(tab as SovereignTab)
         );
         break;
       case "Activity":
-        new ActivityViewComponent(this.tabContentEl, this.app);
+        new ActivityViewComponent(this.tabContentEl, this.app, this.services.brain);
         break;
       case "Settings":
-        new SettingsViewComponent(this.tabContentEl, this.app);
+        new SettingsViewComponent(this.tabContentEl, this.app, this.services.brain);
         break;
     }
   }
 
   private async updateStatusBar(): Promise<void> {
     this.statusBarEl.empty();
-    const health = await mockService.getHealthMetrics();
 
-    const stat1 = this.statusBarEl.createDiv({ cls: "sovereign-sb-item" });
-    stat1.createSpan({ text: "Indexed: ", cls: "sovereign-sb-label" });
-    stat1.createSpan({ text: `${health.indexed_notes.toLocaleString()} notes`, cls: "sovereign-sb-val" });
+    try {
+      const { health, offline } = await this.services.brain.getHealthDetailed();
 
-    this.statusBarEl.createSpan({ text: "•", cls: "sovereign-sb-sep" });
+      if (offline) {
+        this.statusBarEl.createSpan({
+          text: "● core offline — start it in settings",
+          cls: "sovereign-sb-label sovereign-text-warning",
+        });
+        return;
+      }
 
-    const stat2 = this.statusBarEl.createDiv({ cls: "sovereign-sb-item" });
-    stat2.createSpan({ text: "Memories: ", cls: "sovereign-sb-label" });
-    stat2.createSpan({ text: `83`, cls: "sovereign-sb-val" });
+      const stat1 = this.statusBarEl.createDiv({ cls: "sovereign-sb-item" });
+      stat1.createSpan({ text: "Indexed: ", cls: "sovereign-sb-label" });
+      stat1.createSpan({
+        text: `${health.indexed_notes.toLocaleString()} notes`,
+        cls: "sovereign-sb-val",
+      });
 
-    this.statusBarEl.createSpan({ text: "•", cls: "sovereign-sb-sep" });
+      this.statusBarEl.createSpan({ text: "•", cls: "sovereign-sb-sep" });
 
-    const stat3 = this.statusBarEl.createDiv({ cls: "sovereign-sb-item" });
-    stat3.createSpan({ text: "Review: ", cls: "sovereign-sb-label" });
-    stat3.createSpan({
-      text: `${health.pending_memories}`,
-      cls: `sovereign-sb-val ${health.pending_memories > 0 ? "sovereign-text-warning" : ""}`,
-    });
+      const stat2 = this.statusBarEl.createDiv({ cls: "sovereign-sb-item" });
+      stat2.createSpan({ text: "Review: ", cls: "sovereign-sb-label" });
+      stat2.createSpan({
+        text: `${health.pending_memories}`,
+        cls: `sovereign-sb-val ${health.pending_memories > 0 ? "sovereign-text-warning" : ""}`,
+      });
+
+      this.statusBarEl.createSpan({ text: "•", cls: "sovereign-sb-sep" });
+
+      const stat3 = this.statusBarEl.createDiv({ cls: "sovereign-sb-item" });
+      stat3.createSpan({ text: "Conflicts: ", cls: "sovereign-sb-label" });
+      stat3.createSpan({
+        text: `${health.potential_contradictions}`,
+        cls: `sovereign-sb-val ${health.potential_contradictions > 0 ? "sovereign-text-warning" : ""}`,
+      });
+    } catch {
+      this.statusBarEl.createSpan({
+        text: "● status unavailable",
+        cls: "sovereign-sb-label",
+      });
+    }
 
     this.statusBarEl.addEventListener("click", () => this.switchTab("Brain Health"));
   }
 
   private async onActiveFileChanged(file: TFile | null): Promise<void> {
     const path = file ? file.path : undefined;
-    const context = await mockService.getNoteContext(path);
-    this.contextCard.render(context);
+    try {
+      const context = await this.services.brain.getNoteContext(path);
+      this.contextCard.render(context);
+    } catch {
+      // Context card stays as-is on transient failures (§31).
+    }
   }
 }

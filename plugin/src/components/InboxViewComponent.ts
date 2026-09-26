@@ -1,5 +1,6 @@
 import { App } from "obsidian";
-import { mockService } from "../mock/mockData";
+import type { BrainDataService } from "../services/brainDataService";
+import type { BrainHealthMetrics } from "../types/protocol";
 
 export class InboxViewComponent {
   private containerEl: HTMLElement;
@@ -7,6 +8,7 @@ export class InboxViewComponent {
   constructor(
     parentEl: HTMLElement,
     _app: App,
+    private brain: BrainDataService,
     private onNavigateTab: (tab: string) => void
   ) {
     this.containerEl = parentEl.createDiv({ cls: "sovereign-inbox-view" });
@@ -23,10 +25,16 @@ export class InboxViewComponent {
       cls: "sovereign-text-muted sovereign-text-xs",
     });
 
-    const health = await mockService.getHealthMetrics();
-    const ops = await mockService.getOperations();
-    const pendingOpsCount = ops.filter((o) => o.status === "proposed").length;
+    const { health, offline } = await this.brain.getHealthDetailed();
+    if (offline) {
+      const offlineEl = this.containerEl.createDiv({ cls: "sovereign-empty-state" });
+      offlineEl.createSpan({ text: "The Sovereign core is not running. Start it from settings." });
+      return;
+    }
+    this.renderItems(health);
+  }
 
+  private renderItems(health: BrainHealthMetrics): void {
     const list = this.containerEl.createDiv({ cls: "sovereign-inbox-list" });
 
     // Memory candidates item
@@ -44,21 +52,6 @@ export class InboxViewComponent {
     });
     memBtn.addEventListener("click", () => this.onNavigateTab("Memory"));
 
-    // Actions item
-    const actionItem = list.createDiv({ cls: "sovereign-inbox-item" });
-    const actionLeft = actionItem.createDiv({ cls: "sovereign-inbox-item-left" });
-    actionLeft.createSpan({ text: "⚡ Proposed Actions", cls: "sovereign-inbox-item-title" });
-    actionLeft.createSpan({
-      text: `${pendingOpsCount} vault modification proposal`,
-      cls: "sovereign-text-muted sovereign-text-xs",
-    });
-    const actionBadge = actionItem.createDiv({ cls: "sovereign-inbox-item-right" });
-    const actionBtn = actionBadge.createEl("button", {
-      text: `Inspect (${pendingOpsCount})`,
-      cls: "sovereign-btn-sm sovereign-btn-secondary",
-    });
-    actionBtn.addEventListener("click", () => this.onNavigateTab("Actions"));
-
     // Contradictions item
     const contItem = list.createDiv({ cls: "sovereign-inbox-item" });
     const contLeft = contItem.createDiv({ cls: "sovereign-inbox-item-left" });
@@ -69,24 +62,39 @@ export class InboxViewComponent {
     });
     const contBadge = contItem.createDiv({ cls: "sovereign-inbox-item-right" });
     const contBtn = contBadge.createEl("button", {
-      text: "View in Ask",
+      text: "Ask About It",
       cls: "sovereign-btn-sm",
     });
     contBtn.addEventListener("click", () => this.onNavigateTab("Ask"));
 
-    // Stale knowledge item
-    const staleItem = list.createDiv({ cls: "sovereign-inbox-item" });
-    const staleLeft = staleItem.createDiv({ cls: "sovereign-inbox-item-left" });
-    staleLeft.createSpan({ text: "⏳ Stale Knowledge", cls: "sovereign-inbox-item-title" });
-    staleLeft.createSpan({
-      text: `${health.stale_knowledge} notes untouched for >180 days`,
+    // Duplicates item
+    const dupItem = list.createDiv({ cls: "sovereign-inbox-item" });
+    const dupLeft = dupItem.createDiv({ cls: "sovereign-inbox-item-left" });
+    dupLeft.createSpan({ text: "📄 Possible Duplicates", cls: "sovereign-inbox-item-title" });
+    dupLeft.createSpan({
+      text: `${health.duplicate_notes} identical-content pairs found`,
       cls: "sovereign-text-muted sovereign-text-xs",
     });
-    const staleBadge = staleItem.createDiv({ cls: "sovereign-inbox-item-right" });
-    const staleBtn = staleBadge.createEl("button", {
+    const dupBadge = dupItem.createDiv({ cls: "sovereign-inbox-item-right" });
+    const dupBtn = dupBadge.createEl("button", {
       text: "Inspect",
       cls: "sovereign-btn-sm",
     });
-    staleBtn.addEventListener("click", () => this.onNavigateTab("Brain Health"));
+    dupBtn.addEventListener("click", () => this.onNavigateTab("Brain Health"));
+
+    // Broken links item
+    const linkItem = list.createDiv({ cls: "sovereign-inbox-item" });
+    const linkLeft = linkItem.createDiv({ cls: "sovereign-inbox-item-left" });
+    linkLeft.createSpan({ text: "🔗 Broken Links", cls: "sovereign-inbox-item-title" });
+    linkLeft.createSpan({
+      text: `${health.broken_links} wiki-links do not resolve`,
+      cls: "sovereign-text-muted sovereign-text-xs",
+    });
+    const linkBadge = linkItem.createDiv({ cls: "sovereign-inbox-item-right" });
+    const linkBtn = linkBadge.createEl("button", {
+      text: "Inspect",
+      cls: "sovereign-btn-sm",
+    });
+    linkBtn.addEventListener("click", () => this.onNavigateTab("Brain Health"));
   }
 }

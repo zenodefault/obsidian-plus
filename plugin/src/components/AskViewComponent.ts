@@ -1,6 +1,6 @@
-import { App } from "obsidian";
+import { App, Notice } from "obsidian";
 import { AskQueryResult } from "../types/protocol";
-import { mockService } from "../mock/mockData";
+import type { BrainDataService } from "../services/brainDataService";
 
 export class AskViewComponent {
   private containerEl: HTMLElement;
@@ -11,13 +11,12 @@ export class AskViewComponent {
   constructor(
     parentEl: HTMLElement,
     private app: App,
+    private brain: BrainDataService,
     private onJumpToMemory?: (id: string) => void
   ) {
     this.containerEl = parentEl.createDiv({ cls: "sovereign-ask-view" });
     this.buildInputArea();
     this.resultContainerEl = this.containerEl.createDiv({ cls: "sovereign-ask-results" });
-    // Render initial sample answer
-    void this.performSearch("What are our architectural principles for Sovereign Second Brain?");
   }
 
   private buildInputArea(): void {
@@ -32,11 +31,11 @@ export class AskViewComponent {
 
     const hints = actionsRow.createDiv({ cls: "sovereign-ask-hints" });
     const quickChip = hints.createEl("button", {
-      text: "⚡ Core Architecture",
+      text: "⚡ My goals",
       cls: "sovereign-chip-btn",
     });
     quickChip.addEventListener("click", () => {
-      this.inputEl.value = "What are our architectural principles for Sovereign Second Brain?";
+      this.inputEl.value = "What are my current goals?";
       void this.performSearch(this.inputEl.value);
     });
 
@@ -71,12 +70,17 @@ export class AskViewComponent {
     loadingEl.createDiv({ cls: "sovereign-spinner" });
     loadingEl.createSpan({ text: "Searching your knowledge locally...", cls: "sovereign-loading-text" });
 
-    // Simulate async local retrieval delay
-    await new Promise((resolve) => setTimeout(resolve, 350));
-
-    const result = await mockService.queryAsk(query);
-    this.askButton.disabled = false;
-    this.renderResult(result);
+    try {
+      const result = await this.brain.queryBrain(query);
+      this.renderResult(result);
+    } catch (err) {
+      new Notice(`Ask failed: ${err instanceof Error ? err.message : String(err)}`);
+      this.resultContainerEl.empty();
+      const emptyEl = this.resultContainerEl.createDiv({ cls: "sovereign-empty-state" });
+      emptyEl.createSpan({ text: "The question could not be answered. Your notes were not modified." });
+    } finally {
+      this.askButton.disabled = false;
+    }
   }
 
   private renderResult(result: AskQueryResult): void {
@@ -119,7 +123,7 @@ export class AskViewComponent {
       }
     }
 
-    // Sources drawer
+    // Sources drawer (click opens the real note)
     if (result.sources.length > 0) {
       const srcSection = card.createDiv({ cls: "sovereign-sources-section" });
       const srcTitle = srcSection.createDiv({ cls: "sovereign-section-subhead" });
@@ -133,7 +137,7 @@ export class AskViewComponent {
           void this.app.workspace.openLinkText(src.path, "", false);
         });
 
-        if (src.score) {
+        if (src.score !== undefined) {
           srcCard.createSpan({
             text: `${Math.round(src.score * 100)}% match`,
             cls: "sovereign-source-score",

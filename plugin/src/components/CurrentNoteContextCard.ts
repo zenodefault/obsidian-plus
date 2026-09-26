@@ -1,5 +1,6 @@
 import { App } from "obsidian";
 import { CurrentNoteContext } from "../types/protocol";
+import type { BrainDataService } from "../services/brainDataService";
 
 export class CurrentNoteContextCard {
   private containerEl: HTMLElement;
@@ -7,6 +8,7 @@ export class CurrentNoteContextCard {
   constructor(
     parentEl: HTMLElement,
     private app: App,
+    _brain: BrainDataService,
     private onAskAboutNote: (noteTitle: string) => void
   ) {
     this.containerEl = parentEl.createDiv({ cls: "sovereign-context-card" });
@@ -22,7 +24,9 @@ export class CurrentNoteContextCard {
       cls: "sovereign-context-filename",
     });
     titleLink.addEventListener("click", () => {
-      void this.app.workspace.openLinkText(context.path, "", false);
+      if (context.path) {
+        void this.app.workspace.openLinkText(context.path, "", false);
+      }
     });
 
     const metricsGrid = this.containerEl.createDiv({ cls: "sovereign-context-grid" });

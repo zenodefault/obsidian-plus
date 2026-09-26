@@ -1,9 +1,10 @@
 import { App, Notice } from "obsidian";
+import type { BrainDataService } from "../services/brainDataService";
 
 export class SettingsViewComponent {
   private containerEl: HTMLElement;
 
-  constructor(parentEl: HTMLElement, _app: App) {
+  constructor(parentEl: HTMLElement, _app: App, private brain: BrainDataService) {
     this.containerEl = parentEl.createDiv({ cls: "sovereign-settings-view" });
     void this.render();
   }
@@ -18,7 +19,8 @@ export class SettingsViewComponent {
       cls: "sovereign-text-muted sovereign-text-xs",
     });
 
-    // Zero-Cloud Privacy Status Card (PLAN.md §28)
+    // Zero-Cloud Privacy Status Card (PLAN.md §28) — architectural facts,
+    // identical whether or not the core is running.
     const privCard = this.containerEl.createDiv({
       cls: "sovereign-card sovereign-privacy-card",
     });
@@ -47,45 +49,62 @@ export class SettingsViewComponent {
       cls: "sovereign-text-muted sovereign-text-xs sovereign-privacy-footnote",
     });
 
-    // Local Models Configuration
+    // Local model status — real `models.status` (§74), live from the core.
     const modelsSection = this.containerEl.createDiv({ cls: "sovereign-settings-section" });
     modelsSection.createEl("h5", { text: "Local Inference Models" });
 
-    const form = modelsSection.createDiv({ cls: "sovereign-form" });
+    if (!this.brain.isOnline()) {
+      const offlineEl = modelsSection.createDiv({ cls: "sovereign-empty-state" });
+      offlineEl.createSpan({ text: "The Sovereign core is not running — model status unavailable." });
+      return;
+    }
 
-    // Chat Model
-    const chatField = form.createDiv({ cls: "sovereign-field" });
-    chatField.createEl("label", { text: "Local Chat Model (GGUF):", cls: "sovereign-field-label" });
-    chatField.createEl("input", {
-      type: "text",
-      value: "models/llama-3.2-3b-instruct-q4_k_m.gguf",
-      cls: "sovereign-input",
-    });
+    try {
+      const { request } = this.brain.getClient();
+      const status = await request<{
+        provider: string;
+        model_path?: string;
+        binary_path?: string;
+        dimension: number;
+        chunks_total: number;
+        chunks_embedded: number;
+        chunks_pending: number;
+        validation_error?: string;
+      }>("models.status", {});
 
-    // Embedding Model
-    const embField = form.createDiv({ cls: "sovereign-field" });
-    embField.createEl("label", { text: "Local Embedding Model (GGUF):", cls: "sovereign-field-label" });
-    embField.createEl("input", {
-      type: "text",
-      value: "models/bge-small-en-v1.5-q8_0.gguf",
-      cls: "sovereign-input",
-    });
+      const form = modelsSection.createDiv({ cls: "sovereign-form" });
 
-    // Context Window
-    const ctxField = form.createDiv({ cls: "sovereign-field" });
-    ctxField.createEl("label", { text: "Context Window Size (tokens):", cls: "sovereign-field-label" });
-    ctxField.createEl("input", {
-      type: "number",
-      value: "8192",
-      cls: "sovereign-input",
-    });
+      const row = (label: string, value: string, warn = false) => {
+        const field = form.createDiv({ cls: "sovereign-field" });
+        field.createEl("label", { text: label, cls: "sovereign-field-label" });
+        const span = field.createSpan({ text: value, cls: "sovereign-input sovereign-privacy-val" });
+        if (warn) span.addClass("sovereign-text-warning");
+        return span;
+      };
 
-    const saveBtn = form.createEl("button", {
-      text: "Save Model Settings",
-      cls: "mod-cta sovereign-btn-block",
-    });
-    saveBtn.addEventListener("click", () => {
-      new Notice("Local model paths saved. Models verified locally.");
-    });
+      row("Provider:", status.provider);
+      row("Embedding model:", status.model_path ?? "built-in deterministic hash embedder");
+      row("Model binary:", status.binary_path ?? "in-process (none required)");
+      row("Vector dimension:", String(status.dimension));
+      row(
+        "Embedded chunks:",
+        `${status.chunks_embedded} / ${status.chunks_total}` +
+          (status.chunks_pending > 0 ? ` (${status.chunks_pending} pending)` : ""),
+        status.chunks_pending > 0,
+      );
+      if (status.validation_error) {
+        row("Validation error:", status.validation_error, true);
+      }
+      privCard.createEl("p", {
+        text: "Models are never downloaded. Provide local GGUF files via the core settings to upgrade beyond the built-in embedder.",
+        cls: "sovereign-text-muted sovereign-text-xs sovereign-privacy-footnote",
+      });
+    } catch (err) {
+      const errEl = modelsSection.createDiv({ cls: "sovereign-empty-state" });
+      errEl.createSpan({
+        text: `Model status unavailable: ${err instanceof Error ? err.message : String(err)}`,
+      });
+      void Notice;
+    }
   }
 }

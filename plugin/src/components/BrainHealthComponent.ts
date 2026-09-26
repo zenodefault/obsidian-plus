@@ -1,5 +1,6 @@
-import { App, Notice } from "obsidian";
-import { mockService } from "../mock/mockData";
+import { App } from "obsidian";
+import type { BrainDataService } from "../services/brainDataService";
+import type { BrainHealthMetrics } from "../types/protocol";
 
 export class BrainHealthComponent {
   private containerEl: HTMLElement;
@@ -7,6 +8,7 @@ export class BrainHealthComponent {
   constructor(
     parentEl: HTMLElement,
     _app: App,
+    private brain: BrainDataService,
     private onNavigateTab?: (tab: string) => void
   ) {
     this.containerEl = parentEl.createDiv({ cls: "sovereign-health-view" });
@@ -23,8 +25,19 @@ export class BrainHealthComponent {
       cls: "sovereign-text-muted sovereign-text-xs",
     });
 
-    const metrics = await mockService.getHealthMetrics();
+    const { health, offline } = await this.brain.getHealthDetailed();
+    if (offline) {
+      const offlineEl = this.containerEl.createDiv({ cls: "sovereign-empty-state" });
+      offlineEl.createSpan({
+        text: "The Sovereign core is not running. Start it from settings — your vault is safe and untouched.",
+      });
+      return;
+    }
 
+    this.renderCards(health);
+  }
+
+  private renderCards(metrics: BrainHealthMetrics): void {
     const cardsGrid = this.containerEl.createDiv({ cls: "sovereign-health-cards" });
 
     const items = [
@@ -33,9 +46,9 @@ export class BrainHealthComponent {
         title: "Indexed Notes",
         value: `${metrics.indexed_notes} notes`,
         status: "ok",
-        desc: "All active markdown notes parsed & locally indexed.",
-        actionLabel: "Re-index All",
-        action: () => new Notice("Local vault re-indexing scheduled in background."),
+        desc: "Active markdown notes parsed & locally indexed.",
+        actionLabel: "Open Activity",
+        action: () => this.onNavigateTab?.("Activity"),
       },
       {
         icon: metrics.pending_memories > 0 ? "⚠" : "✓",
@@ -51,36 +64,27 @@ export class BrainHealthComponent {
         title: "Contradictions",
         value: `${metrics.potential_contradictions} detected`,
         status: metrics.potential_contradictions > 0 ? "warn" : "ok",
-        desc: "Temporal knowledge divergences detected across notes.",
+        desc: "Opposite statements on the same subject across notes.",
         actionLabel: "Inspect Conflict",
         action: () => this.onNavigateTab?.("Ask"),
       },
       {
-        icon: "⚠",
-        title: "Stale Knowledge",
-        value: `${metrics.stale_knowledge} notes`,
-        status: "warn",
-        desc: "Notes untouched for over 180 days with dependent links.",
-        actionLabel: "Show Stale Notes",
-        action: () => new Notice("Stale notes filter applied."),
-      },
-      {
-        icon: "⚠",
+        icon: metrics.duplicate_notes > 0 ? "⚠" : "✓",
         title: "Possible Duplicates",
-        value: `${metrics.duplicate_notes} notes`,
-        status: "warn",
-        desc: "High semantic overlap between distinct note files.",
+        value: `${metrics.duplicate_notes} pairs`,
+        status: metrics.duplicate_notes > 0 ? "warn" : "ok",
+        desc: "Identical content across distinct note files.",
         actionLabel: "View Overlaps",
         action: () => this.onNavigateTab?.("Actions"),
       },
       {
-        icon: "✓",
+        icon: metrics.broken_links > 0 ? "⚠" : "✓",
         title: "Broken Links",
         value: `${metrics.broken_links} errors`,
-        status: "ok",
-        desc: "All internal wiki-links resolve cleanly.",
-        actionLabel: "Verify Links",
-        action: () => new Notice("All vault links are healthy."),
+        status: metrics.broken_links > 0 ? "warn" : "ok",
+        desc: "Internal wiki-links that do not resolve to a note.",
+        actionLabel: "Resync Vault",
+        action: () => this.onNavigateTab?.("Brain Health"),
       },
     ];
 

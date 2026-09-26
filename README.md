@@ -28,7 +28,7 @@ Implementation follows the workstream order in [PLAN.md](PLAN.md) (UI/UX workstr
 | 6 — Memory | memory lifecycle, contradictions, stale detection | ✅ |
 | 7 — Reasoning | classification, context assembly, `brain.ask`, citation validation | ✅ (LLM refinement via user-supplied local model) |
 | 8 — Agent & Safety | planner, policy, operations, approval, rollback, audit | ✅ |
-| 9 — Hardening | security tests, benchmarks | ⬜ |
+| 9 — Hardening | security tests, failure recovery, resource limits | ✅ (benchmarks in `benchmark/`) |
 
 ## Building
 

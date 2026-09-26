@@ -14,23 +14,32 @@ import { DEFAULT_SETTINGS, SovereignBrainSettings } from "./settings/settings";
 import { buildInventory, readNote } from "./vault/inventory";
 import { runSync, SyncAbortedError } from "./vault/sync";
 import { createVaultWatcher } from "./vault/attach";
-import { SovereignSidebarView, VIEW_TYPE_SOVEREIGN_SIDEBAR } from "./views/SovereignSidebarView";
+import { SovereignSidebarView, VIEW_TYPE_SOVEREIGN_SIDEBAR, SidebarServices } from "./views/SovereignSidebarView";
 import { SovereignBrainSettingTab } from "./settings/SettingTab";
-import { USE_MOCK_IPC } from "./config";
+import {
+  RealBrainDataService,
+  daemonClient,
+} from "./services/brainDataService";
+import {
+  OperationService,
+  obsidianVaultBridge,
+} from "./services/operationService";
 
 export default class SovereignSecondBrainPlugin extends Plugin {
   settings: SovereignBrainSettings = { ...DEFAULT_SETTINGS };
   private daemon: SovereignDaemon | null = null;
+  private brain: RealBrainDataService | null = null;
+  private operations: OperationService | null = null;
   private syncInFlight: Promise<void> | null = null;
   private syncQueued = false;
 
   async onload(): Promise<void> {
     await this.loadSettings();
 
-    // Register primary sidebar panel view
+    // Register primary sidebar panel view with the real data services
     this.registerView(
       VIEW_TYPE_SOVEREIGN_SIDEBAR,
-      (leaf: WorkspaceLeaf) => new SovereignSidebarView(leaf)
+      (leaf: WorkspaceLeaf) => new SovereignSidebarView(leaf, this.sidebarServices())
     );
 
     // Ribbon icon to toggle/reveal sidebar
@@ -81,6 +90,19 @@ export default class SovereignSecondBrainPlugin extends Plugin {
   /** Access for later workstreams (views, commands) — not for UI styling. */
   getDaemon(): SovereignDaemon | null {
     return this.daemon;
+  }
+
+  /** Services wired to the live daemon; null-client closures when offline. */
+  private sidebarServices(): SidebarServices {
+    this.brain =
+      this.brain ?? new RealBrainDataService(() => (this.daemon ? daemonClient(this.daemon) : null));
+    if (!this.operations && this.app) {
+      this.operations = new OperationService(
+        () => (this.daemon ? daemonClient(this.daemon) : null),
+        obsidianVaultBridge(this.app.vault),
+      );
+    }
+    return { brain: this.brain, operations: this.operations };
   }
 
   /** Trigger an incremental sync (coalesced if one is already running). */
@@ -139,13 +161,9 @@ export default class SovereignSecondBrainPlugin extends Plugin {
       this.settings.coreBinaryPath || resolveCoreBinary(pluginDir) || "";
 
     if (!binaryPath) {
-      if (USE_MOCK_IPC) {
-        console.info("[sovereign] USE_MOCK_IPC is active — running UI decoupled from core binary.");
-        return;
-      }
       console.warn(
         "[sovereign] core binary not found — build core/ (scripts/build.sh) " +
-          "or set coreBinaryPath in plugin settings.",
+          "or set coreBinaryPath in plugin settings. The sidebar will show offline states.",
       );
       return;
     }

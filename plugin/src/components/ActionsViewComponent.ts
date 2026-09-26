@@ -1,6 +1,6 @@
 import { App, Notice } from "obsidian";
-import { ProposedOperation } from "../types/protocol";
-import { mockService } from "../mock/mockData";
+import type { OperationPreview } from "../services/operationService";
+import type { OperationService } from "../services/operationService";
 
 export class ActionsViewComponent {
   private containerEl: HTMLElement;
@@ -9,6 +9,7 @@ export class ActionsViewComponent {
   constructor(
     parentEl: HTMLElement,
     private app: App,
+    private operations: OperationService,
     private onActionCompleted?: () => void
   ) {
     this.containerEl = parentEl.createDiv({ cls: "sovereign-actions-view" });
@@ -25,7 +26,13 @@ export class ActionsViewComponent {
 
   async refresh(): Promise<void> {
     this.listEl.empty();
-    const ops = await mockService.getOperations();
+    let ops: OperationPreview[];
+    try {
+      ops = await this.operations.listPreviews();
+    } catch (err) {
+      new Notice(`Could not load operations: ${err instanceof Error ? err.message : String(err)}`);
+      ops = [];
+    }
 
     if (ops.length === 0) {
       const empty = this.listEl.createDiv({ cls: "sovereign-empty-state" });
@@ -38,7 +45,7 @@ export class ActionsViewComponent {
     }
   }
 
-  private renderOperationCard(op: ProposedOperation): void {
+  private renderOperationCard(op: OperationPreview): void {
     const card = this.listEl.createDiv({ cls: "sovereign-card sovereign-action-card" });
 
     // Top Title & Risk
@@ -49,7 +56,7 @@ export class ActionsViewComponent {
       cls: `sovereign-badge sovereign-badge-risk-${op.risk}`,
     });
 
-    // Why section
+    // Why section (§63 preview: WHY / WHAT / risk / files)
     const whyBox = card.createDiv({ cls: "sovereign-action-why" });
     whyBox.createSpan({ text: "WHY: ", cls: "sovereign-text-bold sovereign-text-xs" });
     whyBox.createSpan({ text: op.why, cls: "sovereign-text-muted" });
@@ -67,7 +74,7 @@ export class ActionsViewComponent {
       });
     }
 
-    // Diff preview container
+    // Diff preview
     for (const diff of op.diffs) {
       const diffContainer = card.createDiv({ cls: "sovereign-diff-box" });
       const diffHeader = diffContainer.createDiv({ cls: "sovereign-diff-header" });
@@ -82,7 +89,7 @@ export class ActionsViewComponent {
       }
     }
 
-    // Action Triggers
+    // Status + triggers (§63: approve/reject; §65: rollback after apply)
     const actionsRow = card.createDiv({ cls: "sovereign-card-footer" });
     actionsRow.createSpan({
       text: `Status: ${op.status.toUpperCase()}`,
@@ -97,8 +104,14 @@ export class ActionsViewComponent {
         cls: "mod-cta sovereign-btn-sm",
       });
       approveBtn.addEventListener("click", async () => {
-        await mockService.setOperationStatus(op.id, "approved");
-        new Notice(`Operation approved: ${op.title}`);
+        approveBtn.disabled = true;
+        try {
+          const { applied, verified } = await this.operations.approveAndApply(op.id);
+          new Notice(`Applied ${applied} file change(s). Verification: ${verified}.`);
+        } catch (err) {
+          const msg = err instanceof Error ? err.message : String(err);
+          new Notice(`Apply failed — no partial changes were kept without verification: ${msg}`);
+        }
         await this.refresh();
         this.onActionCompleted?.();
       });
@@ -108,8 +121,30 @@ export class ActionsViewComponent {
         cls: "mod-warning sovereign-btn-sm",
       });
       rejectBtn.addEventListener("click", async () => {
-        await mockService.setOperationStatus(op.id, "rejected");
-        new Notice(`Operation rejected.`);
+        try {
+          await this.operations.reject(op.id);
+          new Notice("Operation rejected.");
+        } catch (err) {
+          new Notice(`Reject failed: ${err instanceof Error ? err.message : String(err)}`);
+        }
+        await this.refresh();
+        this.onActionCompleted?.();
+      });
+    } else if (op.status === "applied") {
+      const btnGroup = actionsRow.createDiv({ cls: "sovereign-btn-group" });
+      const rollbackBtn = btnGroup.createEl("button", {
+        text: "↩ Rollback",
+        cls: "sovereign-btn-sm sovereign-btn-secondary",
+      });
+      rollbackBtn.addEventListener("click", async () => {
+        rollbackBtn.disabled = true;
+        try {
+          const { reverted } = await this.operations.rollback(op.id);
+          new Notice(`Rolled back ${reverted} file change(s).`);
+        } catch (err) {
+          // Typically FILE_VERSION_CONFLICT: a file changed after the op.
+          new Notice(`Rollback refused: ${err instanceof Error ? err.message : String(err)}`);
+        }
         await this.refresh();
         this.onActionCompleted?.();
       });

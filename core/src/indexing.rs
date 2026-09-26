@@ -34,13 +34,21 @@ pub struct SearchHit {
 /// Open the index database for a data dir.
 pub struct NoteIndex {
     conn: Connection,
+    /// Directory the database lives in (exposed for tests and tooling).
+    data_dir: std::path::PathBuf,
 }
 
 impl NoteIndex {
     pub fn open(data_dir: &std::path::Path) -> Result<Self, rusqlite::Error> {
         Ok(Self {
+            data_dir: data_dir.to_path_buf(),
             conn: db::open(data_dir)?,
         })
+    }
+
+    /// Directory the database was opened from (tests, tooling).
+    pub fn data_dir(&self) -> &std::path::Path {
+        &self.data_dir
     }
 
     /// Direct connection access for the job queue and future modules.

@@ -857,3 +857,9 @@
   color: var(--text-muted);
   font-size: 12px;
 }
+
+/* Audit chain verification badge (Part 8 wiring) */
+.sovereign-chain-status {
+  padding: 4px 0 8px 0;
+  font-size: var(--font-ui-small);
+}
