@@ -60,6 +60,7 @@ Rules:
 | `vault.state.get` | `{ include_metadata?: bool }` | `{ total_notes, notes: [{note_id, path, content_hash, title?, tags?}] }` |
 | `vault.rebuild` | `{}` | `{ cleared, message }` |
 | `search.query` | `{ query, limit?: usize ≤ 100 }` | `{ hits: [{note_id, note_path, chunk_id, heading_path, snippet, score}], total_notes }` |
+| `health.summary` | `{}` | `{ total_notes, total_chunks, total_entities, total_claims, broken_links[], orphan_notes[], duplicate_candidates[], failed_jobs, pending_jobs }` |
 
 Lifecycle rules:
 
@@ -92,6 +93,18 @@ over chunk-level content with bm25 ranking and highlighted snippets. Query
 syntax characters in user input are escaped — the query is literal text, never
 an FTS operator expression (§67 hygiene). `score` is higher-is-better.
 Semantic/vector retrieval merges into the same response shape in Part 5.
+
+## Knowledge & health (Part 4)
+
+Extraction is deterministic (§7): entities from tags/wikilinks/titles, typed
+claims (§48) from sentence markers with byte-offset provenance, relationships
+from `uses`/`interested_in`-style link sentences. Re-indexing a note replaces
+its knowledge provenance-scoped — counts stay exact. Deleting a note deletes
+its claims (no source, no claim, §52).
+
+`health.summary` is detection-only (§68): broken links, orphans and exact
+duplicate candidates are reported and never acted upon (§69: never
+auto-delete).
 
 ## Framing constants
 

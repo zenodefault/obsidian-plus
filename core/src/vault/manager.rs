@@ -390,6 +390,16 @@ impl SyncManager {
     ) -> Result<Vec<crate::indexing::SearchHit>, RpcError> {
         self.index.search(query, limit).map_err(db_err)
     }
+
+    /// `health.summary` — read-only scan of derived state (§68).
+    pub fn health_summary(&self) -> Result<crate::health::HealthSummary, RpcError> {
+        crate::health::summary(self.index.connection()).map_err(db_err)
+    }
+
+    /// Link revalidation after renames/new notes (§68 maintenance).
+    pub fn revalidate_links(&self) -> Result<u64, RpcError> {
+        crate::knowledge::revalidate_links(self.index.connection()).map_err(db_err)
+    }
 }
 
 fn no_session() -> RpcError {

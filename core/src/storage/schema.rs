@@ -198,6 +198,31 @@ pub const MIGRATIONS: &[&str] = &[
         INSERT INTO chunks_fts(rowid, text) VALUES (new.rowid, new.text);
     END;
     "#,
+    // v3: knowledge layer provenance (§45–47, §68–69). Entity mentions keep
+    // source_count exact; note_links power broken-link detection; per-note
+    // relationship provenance makes re-extraction idempotent.
+    r#"
+    ALTER TABLE relationships ADD COLUMN source_note_id TEXT REFERENCES notes(id) ON DELETE CASCADE;
+
+    CREATE TABLE IF NOT EXISTS entity_mentions (
+        entity_id TEXT NOT NULL REFERENCES entities(id) ON DELETE CASCADE,
+        note_id TEXT NOT NULL REFERENCES notes(id) ON DELETE CASCADE,
+        PRIMARY KEY (entity_id, note_id)
+    );
+
+    CREATE TABLE IF NOT EXISTS note_links (
+        note_id TEXT NOT NULL REFERENCES notes(id) ON DELETE CASCADE,
+        target TEXT NOT NULL,
+        resolved_note_id TEXT REFERENCES notes(id) ON DELETE SET NULL,
+        PRIMARY KEY (note_id, target)
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_claims_note ON claims(source_note_id);
+    CREATE INDEX IF NOT EXISTS idx_mentions_entity ON entity_mentions(entity_id);
+    CREATE INDEX IF NOT EXISTS idx_links_target ON note_links(resolved_note_id);
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_rel_provenance
+        ON relationships(source_entity_id, relationship_type, target_entity_id, source_note_id);
+    "#,
 ];
 
 /// Apply all pending migrations. The bookkeeping table is created inside an

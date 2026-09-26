@@ -180,3 +180,35 @@ pub struct SearchHitDto {
     /// BM25 relevance (higher is better; normalized client-side).
     pub score: f64,
 }
+
+/// Result payload of `health.summary` (§68; UI §25 renders the categories).
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub struct HealthSummaryResult {
+    pub total_notes: i64,
+    pub total_chunks: i64,
+    pub total_entities: i64,
+    pub total_claims: i64,
+    pub broken_links: Vec<HealthFindingDto>,
+    pub orphan_notes: Vec<HealthFindingDto>,
+    pub duplicate_candidates: Vec<HealthDuplicateDto>,
+    pub failed_jobs: i64,
+    pub pending_jobs: i64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub struct HealthFindingDto {
+    pub kind: String,
+    pub path: String,
+    pub detail: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub struct HealthDuplicateDto {
+    pub note_a: String,
+    pub note_b: String,
+    pub similarity: f64,
+    pub reason: String,
+}

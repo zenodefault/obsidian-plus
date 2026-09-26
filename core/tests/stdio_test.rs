@@ -221,6 +221,54 @@ fn vault_sync_round_trip_over_stdio() {
     ));
     assert!(reply.error.is_none() || reply.result.is_some());
 
+    // Health summary reflects the synced note (Part 4).
+    let reply = core2.request(&Envelope::request("t6", "health.summary", json!({})));
+    let health = reply.result.expect("health result");
+    assert_eq!(health["total_notes"], 1);
+    assert!(health["total_chunks"].as_i64().unwrap() >= 1);
+    assert_eq!(health["failed_jobs"], 0);
+
+    // Sync a duplicate pair (inventory includes the existing note) →
+    // duplicate candidates appear (§69), nothing is deleted.
+    let dup_content = "Duplicated body text.";
+    let hello_content = "# Hello\n\nWorld with [[Other]]. #tag\n";
+    let reply = core2.request(&Envelope::request("t7", "vault.sync.begin", json!({})));
+    let session = reply.result.expect("begin")["session_id"].as_str().unwrap().to_string();
+    core2.request(&Envelope::request(
+        "t8",
+        "vault.sync.batch",
+        json!({
+            "session_id": session,
+            "notes": [
+                {"path": "Notes/Hello.md", "hash": sovereign_core::vault::manager::hash_content(hello_content), "mtime": 5, "size": hello_content.len()},
+                {"path": "Copy1.md", "hash": sovereign_core::vault::manager::hash_content(dup_content), "mtime": 5, "size": dup_content.len()},
+                {"path": "Copy2.md", "hash": sovereign_core::vault::manager::hash_content(dup_content), "mtime": 5, "size": dup_content.len()}
+            ]
+        }),
+    ));
+    core2.request(&Envelope::request("t9", "vault.sync.commit", json!({"session_id": session})));
+    for p in ["Copy1.md", "Copy2.md"] {
+        core2.request(&Envelope::request(
+            "t10",
+            "vault.sync.note",
+            json!({
+                "session_id": session,
+                "path": p,
+                "hash": sovereign_core::vault::manager::hash_content(dup_content),
+                "mtime": 5,
+                "size": dup_content.len(),
+                "content": dup_content
+            }),
+        ));
+    }
+    core2.request(&Envelope::request("t11", "vault.sync.finish", json!({"session_id": session})));
+
+    let reply = core2.request(&Envelope::request("t12", "health.summary", json!({})));
+    let health = reply.result.expect("health result");
+    let dupes = health["duplicate_candidates"].as_array().unwrap();
+    assert_eq!(dupes.len(), 1, "exact duplicate pair detected");
+    assert_eq!(health["total_notes"], 3, "duplicates are reported, never deleted");
+
     core2
         .request(&Envelope::request("t2", "core.shutdown", json!({})));
 }

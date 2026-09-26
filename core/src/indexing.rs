@@ -112,11 +112,20 @@ impl NoteIndex {
             )?;
         }
         tx.commit()?;
+
+        // Knowledge extraction (§45): deterministic, provenance-scoped.
+        crate::knowledge::extract_and_persist(&self.conn, &note_id, path, content)?;
         Ok(note_id)
     }
 
-    /// Delete a note and its chunks (cascades FTS via triggers).
+    /// Delete a note and its chunks (cascades FTS via triggers). Claims are
+    /// deleted explicitly: they are provenance-scoped to their source note,
+    /// not nullable detachments (§45: no source, no claim).
     pub fn delete_note(&self, path: &str) -> Result<bool, rusqlite::Error> {
+        self.conn.execute(
+            "DELETE FROM claims WHERE source_note_id = (SELECT id FROM notes WHERE path = ?1)",
+            params![path],
+        )?;
         let deleted = self.conn.execute(
             "DELETE FROM notes WHERE path = ?1",
             params![path],

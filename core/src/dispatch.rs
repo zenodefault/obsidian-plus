@@ -7,6 +7,7 @@ use crate::protocol::{
     SyncBatchParams, SyncBeginParams, SyncCommitParams, SyncFinishParams, SyncNoteParams,
     CORE_VERSION, PROTOCOL_VERSION,
 };
+use crate::protocol::{HealthDuplicateDto, HealthFindingDto, HealthSummaryResult};
 use crate::vault::manager::{SyncManager, SyncNoteParams as NoteParamsView};
 use serde_json::Value;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -59,6 +60,7 @@ pub fn dispatch(env: &Envelope, state: &Arc<DispatchState>, vault: &Arc<SyncMana
         "vault.state.get" => handle_vault_state_get(env, vault),
         "vault.rebuild" => handle_vault_rebuild(env, vault),
         "search.query" => handle_search_query(env, vault),
+        "health.summary" => handle_health_summary(env, vault),
         _ => {
             if env.id.is_some() {
                 let id = env.id.clone().unwrap_or_default();
@@ -228,6 +230,44 @@ fn handle_search_query(env: &Envelope, vault: &Arc<SyncManager>) -> Outcome {
             let result = SearchQueryResult {
                 hits: dtos,
                 total_notes: vault.total_notes(),
+            };
+            ok(&id, serde_json::to_value(result).unwrap_or(Value::Null))
+        }
+        Err(err) => Outcome::Reply(Envelope::failure(id.clone(), err.with_request_id(id))),
+    }
+}
+
+fn handle_health_summary(env: &Envelope, vault: &Arc<SyncManager>) -> Outcome {
+    let Some(id) = env.id.clone() else { return Outcome::NoReply };
+    match vault.health_summary() {
+        Ok(s) => {
+            let result = HealthSummaryResult {
+                total_notes: s.total_notes,
+                total_chunks: s.total_chunks,
+                total_entities: s.total_entities,
+                total_claims: s.total_claims,
+                broken_links: s
+                    .broken_links
+                    .into_iter()
+                    .map(|f| HealthFindingDto { kind: f.kind, path: f.path, detail: f.detail })
+                    .collect(),
+                orphan_notes: s
+                    .orphan_notes
+                    .into_iter()
+                    .map(|f| HealthFindingDto { kind: f.kind, path: f.path, detail: f.detail })
+                    .collect(),
+                duplicate_candidates: s
+                    .duplicate_candidates
+                    .into_iter()
+                    .map(|d| HealthDuplicateDto {
+                        note_a: d.note_a,
+                        note_b: d.note_b,
+                        similarity: d.similarity,
+                        reason: d.reason,
+                    })
+                    .collect(),
+                failed_jobs: s.failed_jobs,
+                pending_jobs: s.pending_jobs,
             };
             ok(&id, serde_json::to_value(result).unwrap_or(Value::Null))
         }
