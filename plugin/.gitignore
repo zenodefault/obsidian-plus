@@ -1,0 +1,10 @@
+# Mock Data & Test Artifacts
+src/mock/fixtures/*
+!src/mock/fixtures/.gitkeep
+*.mock.json
+.env.local
+
+# Build outputs
+main.js
+styles.css.map
+node_modules/

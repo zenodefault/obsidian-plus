@@ -6,8 +6,14 @@ core/target/
 node_modules/
 plugin/main.js
 plugin/main.js.map
-plugin/styles.css
+plugin/styles.css.map
 dist/
+
+# Mock Data & Test Artifacts
+plugin/src/mock/fixtures/*
+!plugin/src/mock/fixtures/.gitkeep
+*.mock.json
+.env.local
 
 # Local data (never commit user-derived or model data)
 *.db

@@ -5,7 +5,7 @@
  * lives in the core process; UI surfaces come in a later workstream.
  */
 
-import { Plugin } from "obsidian";
+import { Plugin, WorkspaceLeaf } from "obsidian";
 import * as os from "node:os";
 import * as path from "node:path";
 import { SovereignDaemon } from "./services/daemon";
@@ -14,6 +14,9 @@ import { DEFAULT_SETTINGS, SovereignBrainSettings } from "./settings/settings";
 import { buildInventory, readNote } from "./vault/inventory";
 import { runSync, SyncAbortedError } from "./vault/sync";
 import { createVaultWatcher } from "./vault/attach";
+import { SovereignSidebarView, VIEW_TYPE_SOVEREIGN_SIDEBAR } from "./views/SovereignSidebarView";
+import { SovereignBrainSettingTab } from "./settings/SettingTab";
+import { USE_MOCK_IPC } from "./config";
 
 export default class SovereignSecondBrainPlugin extends Plugin {
   settings: SovereignBrainSettings = { ...DEFAULT_SETTINGS };
@@ -23,8 +26,50 @@ export default class SovereignSecondBrainPlugin extends Plugin {
 
   async onload(): Promise<void> {
     await this.loadSettings();
+
+    // Register primary sidebar panel view
+    this.registerView(
+      VIEW_TYPE_SOVEREIGN_SIDEBAR,
+      (leaf: WorkspaceLeaf) => new SovereignSidebarView(leaf)
+    );
+
+    // Ribbon icon to toggle/reveal sidebar
+    this.addRibbonIcon("brain", "Sovereign Second Brain", () => {
+      void this.activateView();
+    });
+
+    // Command palette action
+    this.addCommand({
+      id: "open-sovereign-sidebar",
+      name: "Open Sovereign Brain sidebar",
+      callback: () => {
+        void this.activateView();
+      },
+    });
+
+    // Settings Tab
+    this.addSettingTab(new SovereignBrainSettingTab(this.app, this));
+
     // Never block Obsidian startup on the core (PLAN.md §91).
     void this.startDaemon();
+  }
+
+  async activateView(): Promise<void> {
+    const { workspace } = this.app;
+    let leaf = workspace.getLeavesOfType(VIEW_TYPE_SOVEREIGN_SIDEBAR)[0];
+    if (!leaf) {
+      const rightLeaf = workspace.getRightLeaf(false);
+      if (rightLeaf) {
+        await rightLeaf.setViewState({
+          type: VIEW_TYPE_SOVEREIGN_SIDEBAR,
+          active: true,
+        });
+        leaf = rightLeaf;
+      }
+    }
+    if (leaf) {
+      workspace.revealLeaf(leaf);
+    }
   }
 
   onunload(): void {
@@ -94,6 +139,10 @@ export default class SovereignSecondBrainPlugin extends Plugin {
       this.settings.coreBinaryPath || resolveCoreBinary(pluginDir) || "";
 
     if (!binaryPath) {
+      if (USE_MOCK_IPC) {
+        console.info("[sovereign] USE_MOCK_IPC is active — running UI decoupled from core binary.");
+        return;
+      }
       console.warn(
         "[sovereign] core binary not found — build core/ (scripts/build.sh) " +
           "or set coreBinaryPath in plugin settings.",
