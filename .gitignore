@@ -1,0 +1,27 @@
+# Rust
+core/target/
+**/*.rs.bk
+
+# Node / TypeScript
+node_modules/
+plugin/main.js
+plugin/main.js.map
+plugin/styles.css
+dist/
+
+# Local data (never commit user-derived or model data)
+*.db
+*.db-journal
+*.db-wal
+*.db-shm
+models/
+backups/
+logs/
+
+# Editors / OS
+.vscode/
+.idea/
+.DS_Store
+
+# Freebuff workspace metadata
+.freebuff/

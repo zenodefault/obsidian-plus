@@ -1,0 +1,19 @@
+[package]
+name = "sovereign-core"
+version = "0.1.0"
+edition = "2021"
+description = "Local intelligence core for the Sovereign Second Brain — JSON-RPC over stdio, zero cloud"
+license = "MIT"
+
+[dependencies]
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+dirs = "5"
+
+[lib]
+name = "sovereign_core"
+path = "src/lib.rs"
+
+[[bin]]
+name = "sovereign-core"
+path = "src/main.rs"

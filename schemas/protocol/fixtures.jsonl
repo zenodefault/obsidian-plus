@@ -1,0 +1,8 @@
+{"name": "request_core_health", "valid": true, "wire": {"id": "req_123", "method": "core.health", "params": {}}}
+{"name": "request_unknown_method", "valid": true, "wire": {"id": "req_124", "method": "brain.ask", "params": {"query": "hi"}}}
+{"name": "request_shutdown", "valid": true, "wire": {"id": "req_125", "method": "core.shutdown", "params": {}}}
+{"name": "request_id_wrong_type_invalid", "valid": false, "wire": {"id": 123, "method": "core.health", "params": {}}}
+{"name": "request_unknown_field_invalid", "valid": false, "wire": {"id": "req_126", "method": "core.health", "superfluous": true}}
+{"name": "notification_no_id", "valid": true, "wire": {"method": "core.shutdown", "params": {}}}
+{"name": "response_health_result", "valid": true, "wire": {"id": "req_123", "result": {"status": "ok", "version": "0.1.0", "protocol_version": 1, "pid": 4242}}}
+{"name": "response_error_shape", "valid": true, "wire": {"id": "req_124", "error": {"code": "METHOD_NOT_FOUND", "message": "unknown method: brain.ask", "details": {"method": "brain.ask"}, "request_id": "req_124"}}}
