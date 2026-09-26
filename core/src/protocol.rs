@@ -194,6 +194,79 @@ pub struct ScoreBreakdown {
     pub entity: f64,
 }
 
+// ---- Memory protocol types (§49–55) — re-exported from the memory engine.
+pub use crate::memory::{
+    ContradictionEntry, ClaimRef, MemoryEntry, MemorySource, Resolution,
+};
+
+/// Params of `memory.list`.
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
+#[serde(deny_unknown_fields, default)]
+pub struct MemoryListParams {
+    /// Filter by status (candidate/accepted/rejected/superseded/stale/disputed).
+    pub status: Option<String>,
+}
+
+/// Params of `memory.accept` / `memory.reject`.
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
+#[serde(deny_unknown_fields, default)]
+pub struct MemoryIdParams {
+    pub id: String,
+}
+
+/// Params of `memory.update`.
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
+#[serde(deny_unknown_fields, default)]
+pub struct MemoryUpdateParams {
+    pub id: String,
+    pub content: Option<String>,
+    #[serde(rename = "type")]
+    pub memory_type: Option<String>,
+}
+
+/// Params of `memory.supersede`.
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
+#[serde(deny_unknown_fields, default)]
+pub struct MemorySupersedeParams {
+    pub id: String,
+    pub content: String,
+    #[serde(rename = "type")]
+    pub memory_type: Option<String>,
+}
+
+/// Params of `contradiction.resolve`.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub struct ContradictionResolveParams {
+    pub id: String,
+    pub resolution: Resolution,
+}
+
+/// Result payloads.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub struct MemoryEntryResult {
+    pub memory: MemoryEntry,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub struct MemoryListResult {
+    pub memories: Vec<MemoryEntry>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub struct ContradictionListResult {
+    pub contradictions: Vec<ContradictionEntry>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub struct ContradictionResolveResult {
+    pub message: String,
+}
+
 /// Result payload of `health.summary` (§68; UI §25 renders the categories).
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
 #[serde(deny_unknown_fields)]

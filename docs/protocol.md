@@ -62,6 +62,12 @@ Rules:
 | `search.query` | `{ query, limit?: usize ≤ 100 }` | `{ hits: [{note_id, note_path, chunk_id, heading_path, snippet, score}], total_notes }` |
 | `health.summary` | `{}` | `{ total_notes, total_chunks, total_entities, total_claims, broken_links[], orphan_notes[], duplicate_candidates[], failed_jobs, pending_jobs }` |
 | `models.status` | `{}` | `{ provider, model_path?, binary_path?, dimension, chunks_total, chunks_embedded, chunks_pending, validation_error? }` |
+| `memory.list` | `{ status?: string }` | `{ memories: MemoryEntry[] }` |
+| `memory.accept` / `memory.reject` | `{ id }` | `{ memory: MemoryEntry }` |
+| `memory.update` | `{ id, content?, type? }` | `{ memory: MemoryEntry }` |
+| `memory.supersede` | `{ id, content, type? }` | `{ memory: MemoryEntry }` |
+| `contradiction.list` | `{}` | `{ contradictions: [{id, kind, status, claim_a, claim_b, created_at}] }` |
+| `contradiction.resolve` | `{ id, resolution: keep_both\|mark_later_current\|ignore }` | `{ message }` |
 
 Lifecycle rules:
 
@@ -119,6 +125,17 @@ weight 0.5) + semantic (embedding cosine, 0.35) + entity overlap (0.15),
 merged deterministically. Hybrid hits carry `score_breakdown`; when the model
 is unavailable the response degrades to lexical-only hits **without**
 `score_breakdown` and search keeps working (§76).
+
+## Memory (Part 6)
+
+Memory candidates come only from DECISION/PREFERENCE/GOAL/EXPERIENCE claims
+(§50); hypotheses and questions never become memories (§51). Every memory
+carries provenance (§52): source note, claim, verbatim excerpt. First-person
+claims are attributed to the `user` subject so §54 can catch preference
+conflicts across notes; detection is conservative (same subject + same type +
+opposite polarity) and shows both sources — never auto-chooses (§54).
+Deletion of source notes marks memories `stale` for review, never deletes
+them (§55). Accepted memories survive re-indexing (§90).
 
 ## Framing constants
 

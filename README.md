@@ -25,7 +25,7 @@ Implementation follows the workstream order in [PLAN.md](PLAN.md) (UI/UX workstr
 | 3 — Storage & Index | SQLite, FTS5, chunking, search, job queue | ✅ (vector search in Part 5) |
 | 4 — Knowledge | entities, claims, relationships, provenance | ✅ (AI refinement in Part 7) |
 | 5 — Model Runtime | ModelProvider, hash/CLI embedders, hybrid retrieval | ✅ (GGUF embeddings via user-supplied binary) |
-| 6 — Memory | memory lifecycle, contradictions, stale detection | ⬜ |
+| 6 — Memory | memory lifecycle, contradictions, stale detection | ✅ |
 | 7 — Reasoning | classification, retrieval pipeline, `brain.ask` | ⬜ |
 | 8 — Agent & Safety | planner, policy, operations, rollback, audit | ⬜ |
 | 9 — Hardening | security tests, benchmarks | ⬜ |

@@ -101,6 +101,15 @@ pub fn summary(conn: &Connection) -> Result<HealthSummary, rusqlite::Error> {
         })
         .collect();
 
+    // Memory review counts ride on the summary (§25: Review Needed counts).
+    s.pending_jobs = count(
+        conn,
+        "SELECT COUNT(*) FROM jobs WHERE status = 'pending'",
+    )? + count(
+        conn,
+        "SELECT COUNT(*) FROM memories WHERE status = 'candidate'",
+    )?;
+
     Ok(s)
 }
 

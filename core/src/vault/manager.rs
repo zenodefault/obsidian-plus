@@ -68,6 +68,11 @@ impl SyncManager {
         self.index.total_notes().unwrap_or(0) as u64
     }
 
+    /// Shared connection access (memory/health operations in tests and tools).
+    pub fn index_connection(&self) -> &rusqlite::Connection {
+        self.index.connection()
+    }
+
     /// `vault.sync.begin` — open a session, honouring rebuild.
     ///
     /// A still-active previous session is abandoned (not rolled back): with a
@@ -225,6 +230,9 @@ impl SyncManager {
             to_fetch: to_fetch.clone(),
         });
 
+        // Link revalidation: renames and additions may heal broken links.
+        let _ = crate::knowledge::revalidate_links(self.index.connection());
+
         Ok(SyncCommitResult {
             added: added.into_iter().filter(|p| !rename_targets.contains(p)).collect(),
             modified,
@@ -320,6 +328,16 @@ impl SyncManager {
             }
             *session = None;
         }
+        // Contradiction detection runs at finish (§54): all claims are in.
+        if let Err(e) = crate::memory::detect_contradictions(self.index.connection()) {
+            crate::utils::logging::log(
+                crate::utils::logging::Level::Warn,
+                "sync",
+                "contradiction detection failed",
+                serde_json::json!({ "error": e.to_string() }),
+            );
+        }
+
         Ok(SyncFinishResult {
             total_notes: self.total_notes(),
             persisted: true,
@@ -475,6 +493,67 @@ impl SyncManager {
     /// Link revalidation after renames/new notes (§68 maintenance).
     pub fn revalidate_links(&self) -> Result<u64, RpcError> {
         crate::knowledge::revalidate_links(self.index.connection()).map_err(db_err)
+    }
+
+    // ---- Memory API (§49–55) ----
+
+    pub fn memory_list(
+        &self,
+        status: Option<&str>,
+    ) -> Result<Vec<crate::memory::MemoryEntry>, crate::memory::MemoryApiError> {
+        crate::memory::list(self.index.connection(), status).map_err(crate::memory::MemoryApiError::from)
+    }
+
+    pub fn memory_accept(
+        &self,
+        id: &str,
+    ) -> Result<crate::memory::MemoryEntry, crate::memory::MemoryApiError> {
+        crate::memory::accept(self.index.connection(), id)
+    }
+
+    pub fn memory_reject(
+        &self,
+        id: &str,
+    ) -> Result<crate::memory::MemoryEntry, crate::memory::MemoryApiError> {
+        crate::memory::reject(self.index.connection(), id)
+    }
+
+    pub fn memory_update(
+        &self,
+        id: &str,
+        content: Option<&str>,
+        memory_type: Option<&str>,
+    ) -> Result<crate::memory::MemoryEntry, crate::memory::MemoryApiError> {
+        crate::memory::update(self.index.connection(), id, content, memory_type)
+    }
+
+    pub fn memory_supersede(
+        &self,
+        id: &str,
+        content: &str,
+        memory_type: Option<&str>,
+    ) -> Result<crate::memory::MemoryEntry, crate::memory::MemoryApiError> {
+        crate::memory::supersede(self.index.connection(), id, content, memory_type)
+    }
+
+    pub fn contradictions_list(
+        &self,
+    ) -> Result<Vec<crate::memory::ContradictionEntry>, crate::memory::MemoryApiError> {
+        crate::memory::contradictions_list(self.index.connection())
+            .map_err(crate::memory::MemoryApiError::from)
+    }
+
+    pub fn contradiction_resolve(
+        &self,
+        id: &str,
+        resolution: crate::memory::Resolution,
+    ) -> Result<String, crate::memory::MemoryApiError> {
+        crate::memory::resolve_contradiction(self.index.connection(), id, resolution)
+    }
+
+    /// Run contradiction detection (invoked after sync commit; §54).
+    pub fn detect_contradictions(&self) -> Result<u64, RpcError> {
+        crate::memory::detect_contradictions(self.index.connection()).map_err(db_err)
     }
 }
 

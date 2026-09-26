@@ -90,6 +90,58 @@ export interface ModelStatus {
   validation_error?: string;
 }
 
+// ---- Memory (§49–55) ----
+
+export type MemoryStatus =
+  | "candidate"
+  | "accepted"
+  | "rejected"
+  | "superseded"
+  | "stale"
+  | "disputed";
+
+export interface MemorySource {
+  note_id?: string;
+  note_path?: string;
+  claim_id?: string;
+  excerpt?: string;
+}
+
+export interface MemoryEntry {
+  id: string;
+  type: "goal" | "preference" | "decision" | "experience";
+  content: string;
+  status: MemoryStatus;
+  confidence: number;
+  user_verified: boolean;
+  valid_from?: number;
+  valid_until?: number;
+  created_at: number;
+  updated_at: number;
+  sources: MemorySource[];
+}
+
+export interface ClaimRef {
+  id: string;
+  subject: string;
+  predicate: string;
+  object: string;
+  claim_type: string;
+  polarity: number;
+  note_path?: string;
+}
+
+export interface ContradictionEntry {
+  id: string;
+  kind: string;
+  status: string;
+  claim_a: ClaimRef;
+  claim_b: ClaimRef;
+  created_at: number;
+}
+
+export type ContradictionResolution = "keep_both" | "mark_later_current" | "ignore";
+
 export interface SearchQueryResult {
   hits: SearchHit[];
   total_notes: number;

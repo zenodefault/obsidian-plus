@@ -290,6 +290,58 @@ fn vault_sync_round_trip_over_stdio() {
     assert_eq!(status["chunks_pending"], 0);
     assert!(status["validation_error"].is_null());
 
+    // Memory lifecycle over IPC (Part 6): sync a memory-worthy note, review,
+    // accept, verify provenance and listing.
+    let reply = core2.request(&Envelope::request("m1", "vault.sync.begin", json!({})));
+    let session = reply.result.expect("begin")["session_id"].as_str().unwrap().to_string();
+    let goal_content = "My goal is learning distributed systems.";
+    core2.request(&Envelope::request(
+        "m2",
+        "vault.sync.batch",
+        json!({
+            "session_id": session,
+            "notes": [
+                {"path": "Goals.md", "hash": sovereign_core::vault::manager::hash_content(goal_content), "mtime": 7, "size": goal_content.len()}
+            ]
+        }),
+    ));
+    core2.request(&Envelope::request("m3", "vault.sync.commit", json!({"session_id": session})));
+    core2.request(&Envelope::request(
+        "m4",
+        "vault.sync.note",
+        json!({
+            "session_id": session,
+            "path": "Goals.md",
+            "hash": sovereign_core::vault::manager::hash_content(goal_content),
+            "mtime": 7,
+            "size": goal_content.len(),
+            "content": goal_content
+        }),
+    ));
+    core2.request(&Envelope::request("m5", "vault.sync.finish", json!({"session_id": session})));
+
+    // A candidate exists with provenance.
+    let reply = core2.request(&Envelope::request("m6", "memory.list", json!({"status": "candidate"})));
+    let memories = reply.result.expect("memory.list result")["memories"]
+        .as_array()
+        .unwrap()
+        .clone();
+    assert!(!memories.is_empty(), "goal claim became a candidate");
+    let mem_id = memories[0]["id"].as_str().unwrap().to_string();
+    assert_eq!(memories[0]["sources"].as_array().unwrap().len(), 1);
+    assert_eq!(memories[0]["sources"][0]["note_path"], "Goals.md");
+
+    // Accept it.
+    let reply = core2.request(&Envelope::request("m7", "memory.accept", json!({"id": mem_id})));
+    assert_eq!(reply.result.expect("accept result")["memory"]["status"], "accepted");
+
+    // Contradiction list is empty but the method works.
+    let reply = core2.request(&Envelope::request("m8", "contradiction.list", json!({})));
+    assert!(reply.result.expect("contradiction.list")["contradictions"]
+        .as_array()
+        .unwrap()
+        .is_empty());
+
     core2
         .request(&Envelope::request("t2", "core.shutdown", json!({})));
 }

@@ -2,12 +2,17 @@
 //! response envelopes. Transport-agnostic so tests can drive it directly.
 
 use crate::protocol::{
-    Envelope, ErrorCode, HealthResult, RebuildParams, RebuildResult, RpcError, ScoreBreakdown,
-    SearchHitDto, SearchQueryParams, SearchQueryResult, ShutdownParams, ShutdownResult,
-    StateGetParams, SyncBatchParams, SyncBeginParams, SyncCommitParams, SyncFinishParams,
-    SyncNoteParams, CORE_VERSION, PROTOCOL_VERSION,
+    Envelope, ErrorCode, HealthResult, MemoryEntryResult, MemoryListParams, MemoryListResult,
+    MemorySupersedeParams, MemoryUpdateParams, RebuildParams, RebuildResult,
+    RpcError, ScoreBreakdown, SearchHitDto, SearchQueryParams, SearchQueryResult,
+    ShutdownParams, ShutdownResult, StateGetParams, SyncBatchParams, SyncBeginParams,
+    SyncCommitParams, SyncFinishParams, SyncNoteParams, CORE_VERSION, PROTOCOL_VERSION,
 };
-use crate::protocol::{HealthDuplicateDto, HealthFindingDto, HealthSummaryResult};
+use crate::protocol::{
+    ContradictionListResult, ContradictionResolveParams, ContradictionResolveResult,
+    HealthDuplicateDto, HealthFindingDto, HealthSummaryResult, MemoryIdParams,
+};
+use crate::memory::MemoryApiError;
 use crate::vault::manager::{SyncManager, SyncNoteParams as NoteParamsView};
 use serde_json::Value;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -62,6 +67,13 @@ pub fn dispatch(env: &Envelope, state: &Arc<DispatchState>, vault: &Arc<SyncMana
         "search.query" => handle_search_query(env, vault),
         "health.summary" => handle_health_summary(env, vault),
         "models.status" => handle_models_status(env, vault),
+        "memory.list" => handle_memory_list(env, vault),
+        "memory.accept" => handle_memory_accept(env, vault),
+        "memory.reject" => handle_memory_reject(env, vault),
+        "memory.update" => handle_memory_update(env, vault),
+        "memory.supersede" => handle_memory_supersede(env, vault),
+        "contradiction.list" => handle_contradiction_list(env, vault),
+        "contradiction.resolve" => handle_contradiction_resolve(env, vault),
         _ => {
             if env.id.is_some() {
                 let id = env.id.clone().unwrap_or_default();
@@ -250,6 +262,111 @@ fn handle_models_status(env: &Envelope, vault: &Arc<SyncManager>) -> Outcome {
     match vault.models_status() {
         Ok(status) => ok(&id, serde_json::to_value(status).unwrap_or(Value::Null)),
         Err(err) => Outcome::Reply(Envelope::failure(id.clone(), err.with_request_id(id))),
+    }
+}
+
+fn memory_err(id: &str, e: MemoryApiError) -> Outcome {
+    let (code, message) = match e {
+        MemoryApiError::NotFound(id) => (ErrorCode::InvalidParams, format!("memory not found: {id}")),
+        MemoryApiError::Invalid(m) => (ErrorCode::InvalidParams, m),
+        MemoryApiError::Db(e) => (ErrorCode::Internal, format!("database error: {e}")),
+    };
+    Outcome::Reply(Envelope::failure(
+        id.to_string(),
+        RpcError::new(code, message).with_request_id(id),
+    ))
+}
+
+fn handle_memory_accept(env: &Envelope, vault: &Arc<SyncManager>) -> Outcome {
+    let Some(id) = env.id.clone() else { return Outcome::NoReply };
+    let memory_id = match serde_json::from_value::<MemoryIdParams>(env.params.clone().unwrap_or(Value::Null)) {
+        Ok(p) => p.id,
+        Err(e) => return invalid_params(&id, e),
+    };
+    match vault.memory_accept(&memory_id) {
+        Ok(entry) => ok(&id, serde_json::to_value(MemoryEntryResult { memory: entry }).unwrap_or(Value::Null)),
+        Err(e) => memory_err(&id, e),
+    }
+}
+
+fn handle_memory_reject(env: &Envelope, vault: &Arc<SyncManager>) -> Outcome {
+    let Some(id) = env.id.clone() else { return Outcome::NoReply };
+    let memory_id = match serde_json::from_value::<MemoryIdParams>(env.params.clone().unwrap_or(Value::Null)) {
+        Ok(p) => p.id,
+        Err(e) => return invalid_params(&id, e),
+    };
+    match vault.memory_reject(&memory_id) {
+        Ok(entry) => ok(&id, serde_json::to_value(MemoryEntryResult { memory: entry }).unwrap_or(Value::Null)),
+        Err(e) => memory_err(&id, e),
+    }
+}
+
+fn handle_memory_update(env: &Envelope, vault: &Arc<SyncManager>) -> Outcome {
+    let Some(id) = env.id.clone() else { return Outcome::NoReply };
+    let params: MemoryUpdateParams =
+        match serde_json::from_value(env.params.clone().unwrap_or(Value::Null)) {
+            Ok(p) => p,
+            Err(e) => return invalid_params(&id, e),
+        };
+    match vault.memory_update(&params.id, params.content.as_deref(), params.memory_type.as_deref()) {
+        Ok(entry) => ok(&id, serde_json::to_value(MemoryEntryResult { memory: entry }).unwrap_or(Value::Null)),
+        Err(e) => memory_err(&id, e),
+    }
+}
+
+fn handle_memory_supersede(env: &Envelope, vault: &Arc<SyncManager>) -> Outcome {
+    let Some(id) = env.id.clone() else { return Outcome::NoReply };
+    let params: MemorySupersedeParams =
+        match serde_json::from_value(env.params.clone().unwrap_or(Value::Null)) {
+            Ok(p) => p,
+            Err(e) => return invalid_params(&id, e),
+        };
+    match vault.memory_supersede(&params.id, &params.content, params.memory_type.as_deref()) {
+        Ok(entry) => ok(&id, serde_json::to_value(MemoryEntryResult { memory: entry }).unwrap_or(Value::Null)),
+        Err(e) => memory_err(&id, e),
+    }
+}
+
+fn handle_memory_list(env: &Envelope, vault: &Arc<SyncManager>) -> Outcome {
+    let Some(id) = env.id.clone() else { return Outcome::NoReply };
+    let params: MemoryListParams =
+        match serde_json::from_value(env.params.clone().unwrap_or(Value::Null)) {
+            Ok(p) => p,
+            Err(e) => return invalid_params(&id, e),
+        };
+    match vault.memory_list(params.status.as_deref()) {
+        Ok(memories) => ok(
+            &id,
+            serde_json::to_value(MemoryListResult { memories }).unwrap_or(Value::Null),
+        ),
+        Err(e) => memory_err(&id, e),
+    }
+}
+
+fn handle_contradiction_list(env: &Envelope, vault: &Arc<SyncManager>) -> Outcome {
+    let Some(id) = env.id.clone() else { return Outcome::NoReply };
+    match vault.contradictions_list() {
+        Ok(contradictions) => ok(
+            &id,
+            serde_json::to_value(ContradictionListResult { contradictions }).unwrap_or(Value::Null),
+        ),
+        Err(e) => memory_err(&id, e),
+    }
+}
+
+fn handle_contradiction_resolve(env: &Envelope, vault: &Arc<SyncManager>) -> Outcome {
+    let Some(id) = env.id.clone() else { return Outcome::NoReply };
+    let params: ContradictionResolveParams =
+        match serde_json::from_value(env.params.clone().unwrap_or(Value::Null)) {
+            Ok(p) => p,
+            Err(e) => return invalid_params(&id, e),
+        };
+    match vault.contradiction_resolve(&params.id, params.resolution) {
+        Ok(message) => ok(
+            &id,
+            serde_json::to_value(ContradictionResolveResult { message }).unwrap_or(Value::Null),
+        ),
+        Err(e) => memory_err(&id, e),
     }
 }
 

@@ -8,6 +8,7 @@ pub mod indexing;
 pub mod ipc;
 pub mod jobs;
 pub mod knowledge;
+pub mod memory;
 pub mod models;
 pub mod parser;
 pub mod protocol;

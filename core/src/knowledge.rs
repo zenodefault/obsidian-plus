@@ -138,6 +138,9 @@ fn extract_claims(
         .or_else(|| parsed.headings.first().map(|(_, t, _)| t.clone()))
         .or_else(|| note_title.map(|t| t.to_string()))
         .unwrap_or_else(|| "this note".to_string());
+    // First-person statements are about the USER (§49: memory is user
+    // context), not the note — this is what lets §54 catch preference
+    // conflicts across different notes.
 
     for sentence in sentences(content) {
         let (text, offset) = sentence;
@@ -189,8 +192,19 @@ fn extract_claims(
         let ctype = classify_claim(&lower);
         let Some(ctype) = ctype else { continue };
 
+        // First-person marker → the user is the subject (§49).
+        let claim_subject = if lower.starts_with("i ")
+            || lower.starts_with("i'")
+            || lower.starts_with("my ")
+            || lower.starts_with("we ")
+        {
+            "user".to_string()
+        } else {
+            subject.clone()
+        };
+
         claims.push(ClaimCandidate {
-            subject: subject.clone(),
+            subject: claim_subject,
             predicate: ctype_predicate(ctype).to_string(),
             object: truncate(&text),
             claim_type: ctype,
@@ -449,13 +463,15 @@ pub fn persist(
         }
     }
 
-    // Claims with provenance (§45, §48).
+    // Claims with provenance (§45, §48); collect ids for memory candidates.
+    let mut claim_ids: Vec<(String, String, String, String)> = Vec::new();
     for claim in &knowledge.claims {
+        let claim_id = Uuid::new_v4().to_string();
         tx.execute(
             "INSERT INTO claims (id, subject, predicate, object, claim_type, polarity, confidence, source_note_id, source_offset, status)
              VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, 'active')",
             params![
-                Uuid::new_v4().to_string(),
+                claim_id,
                 claim.subject,
                 claim.predicate,
                 claim.object,
@@ -466,6 +482,12 @@ pub fn persist(
                 claim.source_offset as i64,
             ],
         )?;
+        claim_ids.push((
+            claim_id,
+            claim.claim_type.as_str().to_string(),
+            claim.object.clone(),
+            claim.polarity.to_string(),
+        ));
     }
 
     // Relationships (deduped per note by the unique provenance index).
@@ -494,7 +516,12 @@ pub fn persist(
         )?;
     }
 
-    tx.commit()
+    tx.commit()?;
+
+    // Memory candidates from memory-worthy claims (§50, §108). Runs after the
+    // knowledge transaction commits; re-index dedup keeps review state.
+    crate::memory::generate_candidates_for_note(conn, note_id, &claim_ids, now)?;
+    Ok(())
 }
 
 /// Find-or-create an entity by name for relationship endpoints.
