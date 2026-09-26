@@ -196,6 +196,31 @@ fn vault_sync_round_trip_over_stdio() {
     assert_eq!(state["total_notes"], 1);
     assert_eq!(state["notes"][0]["note_id"], json!(note_id));
     assert_eq!(state["notes"][0]["title"], "Hello");
+
+    // Search over the synced content (FTS5, Part 3).
+    let reply = core2.request(&Envelope::request(
+        "t3",
+        "search.query",
+        json!({"query": "world", "limit": 10}),
+    ));
+    let hits = reply.result.expect("search result")["hits"]
+        .as_array()
+        .unwrap()
+        .clone();
+    assert_eq!(hits.len(), 1);
+    assert_eq!(hits[0]["note_path"], "Notes/Hello.md");
+    assert!(hits[0]["snippet"].is_string());
+
+    // Empty query is rejected; syntax characters never crash the server.
+    let reply = core2.request(&Envelope::request("t4", "search.query", json!({"query": "   "})));
+    assert_eq!(reply.error.unwrap().code, ErrorCode::InvalidParams);
+    let reply = core2.request(&Envelope::request(
+        "t5",
+        "search.query",
+        json!({"query": "\"quoted\" AND (paren) OR NEAR"}),
+    ));
+    assert!(reply.error.is_none() || reply.result.is_some());
+
     core2
         .request(&Envelope::request("t2", "core.shutdown", json!({})));
 }

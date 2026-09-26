@@ -59,6 +59,7 @@ Rules:
 | `vault.sync.finish` | `{ session_id }` | `{ total_notes, persisted }` |
 | `vault.state.get` | `{ include_metadata?: bool }` | `{ total_notes, notes: [{note_id, path, content_hash, title?, tags?}] }` |
 | `vault.rebuild` | `{}` | `{ cleared, message }` |
+| `search.query` | `{ query, limit?: usize ≤ 100 }` | `{ hits: [{note_id, note_path, chunk_id, heading_path, snippet, score}], total_notes }` |
 
 Lifecycle rules:
 
@@ -83,6 +84,14 @@ Note identity: `note_id` is a UUID minted on first content upload and kept
 forever. A rename (same content hash at a new path, with the old path gone)
 carries identity over and needs **no** re-upload. The core never reads or
 writes the vault; the plugin is the sole source of content (§89).
+
+## Search (Part 3)
+
+`search.query` is the deterministic fast path (§94): FTS5 keyword retrieval
+over chunk-level content with bm25 ranking and highlighted snippets. Query
+syntax characters in user input are escaped — the query is literal text, never
+an FTS operator expression (§67 hygiene). `score` is higher-is-better.
+Semantic/vector retrieval merges into the same response shape in Part 5.
 
 ## Framing constants
 

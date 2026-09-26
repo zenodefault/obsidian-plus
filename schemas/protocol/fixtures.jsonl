@@ -10,3 +10,5 @@
 {"name": "request_vault_sync_commit", "valid": true, "wire": {"id": "req_131", "method": "vault.sync.commit", "params": {"session_id": "0b8f4c1e-0000-4000-8000-000000000000"}}}
 {"name": "response_vault_sync_commit", "valid": true, "wire": {"id": "req_131", "result": {"added": ["A.md"], "modified": [], "renamed": [], "deleted": [], "to_fetch": ["A.md"], "applied": 0}}}
 {"name": "request_vault_sync_note", "valid": true, "wire": {"id": "req_132", "method": "vault.sync.note", "params": {"session_id": "0b8f4c1e-0000-4000-8000-000000000000", "path": "A.md", "hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "mtime": 123, "size": 5, "content": "hello"}}}
+{"name": "request_search_query", "valid": true, "wire": {"id": "req_133", "method": "search.query", "params": {"query": "distributed systems", "limit": 10}}}
+{"name": "response_search_query", "valid": true, "wire": {"id": "req_133", "result": {"hits": [{"note_id": "n1", "note_path": "Notes/A.md", "chunk_id": "c1", "heading_path": "Setup > Database", "snippet": "…distributed systems…", "score": 1.5}], "total_notes": 42}}}

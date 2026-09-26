@@ -61,3 +61,19 @@ export interface RebuildResult {
   cleared: boolean;
   message: string;
 }
+
+/** One search hit with citation provenance (§58). */
+export interface SearchHit {
+  note_id: string;
+  note_path: string;
+  chunk_id: string;
+  heading_path: string;
+  snippet: string;
+  /** Higher is better. */
+  score: number;
+}
+
+export interface SearchQueryResult {
+  hits: SearchHit[];
+  total_notes: number;
+}

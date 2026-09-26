@@ -13,6 +13,7 @@ import { SovereignDaemon } from "../src/services/daemon";
 import { RpcErrorImpl } from "../src/types/protocol";
 import { hashContent } from "../src/vault/inventory";
 import { runSync, sendInventoryBatches } from "../src/vault/sync";
+import { searchQuery } from "../src/vault/search";
 import type { SyncNote } from "../src/vault/types";
 
 function findCoreBinary(): string | null {
@@ -199,6 +200,44 @@ d("core integration (real binary)", () => {
     expect(outcome.persisted).toBe(true);
     expect(outcome.totalNotes).toBe(2);
     expect(outcome.uploaded).toBe(2);
+  });
+
+  it("searches synced content through the FTS index", async () => {
+    const content = "# Quantum Notes\n\nEntanglement links distant particles.\n";
+    const begun = await daemon.request<{ session_id: string }>("vault.sync.begin", {});
+    await daemon.request("vault.sync.batch", {
+      session_id: begun.session_id,
+      notes: [
+        { path: "Sci/Quantum.md", hash: hashContent(content), mtime: 9, size: content.length },
+        { path: "Sci/Other.md", hash: hashContent("nothing relevant"), mtime: 9, size: 16 },
+      ],
+    });
+    const diff = await daemon.request<{ to_fetch: string[] }>("vault.sync.commit", {
+      session_id: begun.session_id,
+    });
+    for (const p of diff.to_fetch) {
+      const c = p === "Sci/Quantum.md" ? content : "nothing relevant";
+      await daemon.request("vault.sync.note", {
+        session_id: begun.session_id,
+        path: p,
+        hash: hashContent(c),
+        mtime: 9,
+        size: c.length,
+        content: c,
+      });
+    }
+    await daemon.request("vault.sync.finish", { session_id: begun.session_id });
+
+    const result = await daemon.request<{
+      hits: { note_path: string; snippet: string }[];
+    }>("search.query", { query: "entanglement particles", limit: 5 });
+    expect(result.hits.length).toBeGreaterThanOrEqual(1);
+    expect(result.hits[0]!.note_path).toBe("Sci/Quantum.md");
+    expect(result.hits[0]!.snippet.length).toBeGreaterThan(0);
+
+    // The search wrapper resolves through the same client.
+    const hits = await searchQuery(daemon, "entanglement", 3);
+    expect(hits.length).toBeGreaterThanOrEqual(1);
   });
 
   it("restarts cleanly on demand", async () => {

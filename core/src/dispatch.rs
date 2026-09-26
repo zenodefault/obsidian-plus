@@ -2,9 +2,10 @@
 //! response envelopes. Transport-agnostic so tests can drive it directly.
 
 use crate::protocol::{
-    Envelope, ErrorCode, HealthResult, RebuildParams, RebuildResult, RpcError, ShutdownParams,
-    ShutdownResult, StateGetParams, SyncBatchParams, SyncBeginParams, SyncCommitParams,
-    SyncFinishParams, SyncNoteParams, CORE_VERSION, PROTOCOL_VERSION,
+    Envelope, ErrorCode, HealthResult, RebuildParams, RebuildResult, RpcError, SearchHitDto,
+    SearchQueryParams, SearchQueryResult, ShutdownParams, ShutdownResult, StateGetParams,
+    SyncBatchParams, SyncBeginParams, SyncCommitParams, SyncFinishParams, SyncNoteParams,
+    CORE_VERSION, PROTOCOL_VERSION,
 };
 use crate::vault::manager::{SyncManager, SyncNoteParams as NoteParamsView};
 use serde_json::Value;
@@ -57,6 +58,7 @@ pub fn dispatch(env: &Envelope, state: &Arc<DispatchState>, vault: &Arc<SyncMana
         "vault.sync.finish" => handle_vault_sync_finish(env, vault),
         "vault.state.get" => handle_vault_state_get(env, vault),
         "vault.rebuild" => handle_vault_rebuild(env, vault),
+        "search.query" => handle_search_query(env, vault),
         _ => {
             if env.id.is_some() {
                 let id = env.id.clone().unwrap_or_default();
@@ -192,6 +194,45 @@ fn handle_vault_state_get(env: &Envelope, vault: &Arc<SyncManager>) -> Outcome {
     };
     let result = vault.state_get(params.include_metadata);
     ok(&id, serde_json::to_value(result).unwrap_or(Value::Null))
+}
+
+fn handle_search_query(env: &Envelope, vault: &Arc<SyncManager>) -> Outcome {
+    let Some(id) = env.id.clone() else { return Outcome::NoReply };
+    let params: SearchQueryParams =
+        match serde_json::from_value(env.params.clone().unwrap_or(Value::Null)) {
+            Ok(p) => p,
+            Err(e) => return invalid_params(&id, e),
+        };
+    if params.query.trim().is_empty() {
+        return Outcome::Reply(Envelope::failure(
+            id.clone(),
+            RpcError::new(ErrorCode::InvalidParams, "query must not be empty")
+                .with_request_id(id),
+        ));
+    }
+    let limit = params.limit.unwrap_or(20).min(100);
+    match vault.search(&params.query, limit) {
+        Ok(hits) => {
+            let dtos: Vec<SearchHitDto> = hits
+                .into_iter()
+                .map(|h| SearchHitDto {
+                    note_id: h.note_id,
+                    note_path: h.note_path,
+                    chunk_id: h.chunk_id,
+                    heading_path: h.heading_path,
+                    snippet: h.snippet,
+                    // Negate bm25 (lower is better) so score is higher-is-better.
+                    score: -h.rank,
+                })
+                .collect();
+            let result = SearchQueryResult {
+                hits: dtos,
+                total_notes: vault.total_notes(),
+            };
+            ok(&id, serde_json::to_value(result).unwrap_or(Value::Null))
+        }
+        Err(err) => Outcome::Reply(Envelope::failure(id.clone(), err.with_request_id(id))),
+    }
 }
 
 fn handle_vault_rebuild(env: &Envelope, vault: &Arc<SyncManager>) -> Outcome {

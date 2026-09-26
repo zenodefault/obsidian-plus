@@ -149,3 +149,34 @@ pub use crate::vault::types::{
     RebuildParams, RebuildResult, StateGetParams, SyncBatchParams, SyncBeginParams,
     SyncCommitParams, SyncFinishParams, SyncNote, SyncNoteParams,
 };
+
+/// Params of `search.query` (§42 fast path; semantic retrieval arrives in
+/// Part 5 and merges into the same response shape).
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
+#[serde(deny_unknown_fields, default)]
+pub struct SearchQueryParams {
+    pub query: String,
+    /// Maximum hits to return (default 20, capped at 100).
+    pub limit: Option<usize>,
+}
+
+/// Result payload of `search.query`.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub struct SearchQueryResult {
+    pub hits: Vec<SearchHitDto>,
+    pub total_notes: u64,
+}
+
+/// One search hit with citation provenance (§58: sources are first-class).
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub struct SearchHitDto {
+    pub note_id: String,
+    pub note_path: String,
+    pub chunk_id: String,
+    pub heading_path: String,
+    pub snippet: String,
+    /// BM25 relevance (higher is better; normalized client-side).
+    pub score: f64,
+}

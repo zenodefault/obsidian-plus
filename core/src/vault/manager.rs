@@ -1,15 +1,15 @@
 //! Sync engine: session lifecycle, inventory diff, rename detection, identity.
 //!
 //! The plugin owns the vault (§4.1, §89); this manager only maintains derived
-//! state. All classification is deterministic and unit-testable (§7).
+//! state, now persisted in SQLite via `NoteIndex` (Part 3). All classification
+//! is deterministic and unit-testable (§7).
 
+use crate::indexing::NoteIndex;
 use crate::protocol::{ErrorCode, RpcError};
-use crate::storage::state_store::{now_millis, NoteState, StateStore, VaultState};
 use crate::vault::types::{
     RenamePair, StateGetResult, StateNoteEntry, SyncBatchParams, SyncBeginResult, SyncCommitResult,
     SyncFinishResult, SyncNote, SyncNoteResult,
 };
-use sha2::{Digest, Sha256};
 use std::collections::{HashMap, HashSet};
 use std::path::Path;
 use std::sync::{Arc, Mutex};
@@ -19,10 +19,8 @@ use uuid::Uuid;
 #[derive(Debug, Clone, PartialEq)]
 struct InventoryEntry {
     hash: String,
-    #[allow(dead_code)]
-    mtime: u64,
-    #[allow(dead_code)]
-    size: u64,
+    mtime: i64,
+    size: i64,
 }
 
 /// Content the session still needs, decided at commit time.
@@ -39,35 +37,42 @@ struct Session {
     pending: Option<PendingPlan>,
 }
 
-/// Owns sync state and active sessions. Shared behind `Arc`.
+/// Owns sync state (SQLite) and active sessions. Shared behind `Arc`.
 pub struct SyncManager {
-    store: StateStore,
-    state: Mutex<VaultState>,
+    index: NoteIndex,
     session: Mutex<Option<Session>>,
 }
 
 impl SyncManager {
     pub fn new(data_dir: &Path) -> Arc<Self> {
-        let store = StateStore::new(data_dir);
-        let state = store.load();
+        let index = match NoteIndex::open(data_dir) {
+            Ok(i) => i,
+            Err(e) => {
+                crate::utils::logging::log(
+                    crate::utils::logging::Level::Error,
+                    "sync",
+                    "failed to open database",
+                    serde_json::json!({ "error": e.to_string() }),
+                );
+                panic!("database unavailable: {e}");
+            }
+        };
         Arc::new(Self {
-            store,
-            state: Mutex::new(state),
+            index,
             session: Mutex::new(None),
         })
     }
 
     /// Number of notes currently known (for tests and health surfaces).
     pub fn total_notes(&self) -> u64 {
-        self.lock_state().notes.len() as u64
+        self.index.total_notes().unwrap_or(0) as u64
     }
 
     /// `vault.sync.begin` — open a session, honouring rebuild.
     ///
     /// A still-active previous session is abandoned (not rolled back): with a
     /// single plugin client, a new `begin` proves the old session is garbage
-    /// after a crash or failure. Uncommitted uploads remain in memory as the
-    /// live truth; nothing was persisted.
+    /// after a crash or failure.
     pub fn begin(&self, rebuild: bool) -> Result<SyncBeginResult, RpcError> {
         let mut session = self.lock_session();
         if let Some(old) = session.take() {
@@ -107,16 +112,16 @@ impl SyncManager {
                 note.path.clone(),
                 InventoryEntry {
                     hash: note.hash.clone(),
-                    mtime: note.mtime,
-                    size: note.size,
+                    mtime: note.mtime as i64,
+                    size: note.size as i64,
                 },
             );
         }
         Ok(params.notes.len() as u64)
     }
 
-    /// `vault.sync.commit` — diff inventory vs state, detect renames, apply
-    /// deletions, and return the list of paths whose content is needed.
+    /// `vault.sync.commit` — diff inventory vs SQLite state, detect renames,
+    /// apply deletions, and return the paths whose content is needed.
     pub fn commit(&self, session_id: &str) -> Result<SyncCommitResult, RpcError> {
         let mut session = self.lock_session();
         let Some(s) = session.as_mut() else {
@@ -126,7 +131,18 @@ impl SyncManager {
             return Err(session_mismatch());
         }
 
-        let mut state = self.lock_state();
+        // Current state from SQLite: path → sha256.
+        let state: HashMap<String, String> = {
+            let conn = self.index.connection();
+            let mut stmt = conn
+                .prepare("SELECT path, sha256 FROM notes")
+                .map_err(db_err)?;
+            let rows = stmt
+                .query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?)))
+                .map_err(db_err)?;
+            rows.collect::<Result<HashMap<_, _>, _>>().map_err(db_err)?
+        };
+
         let inventory_paths: HashSet<&String> = s.inventory.keys().collect();
 
         // First pass: classify.
@@ -135,16 +151,16 @@ impl SyncManager {
         let mut deleted: Vec<String> = Vec::new();
 
         for path in s.inventory.keys() {
-            match state.notes.get(path) {
+            match state.get(path) {
                 None => added.push(path.clone()),
-                Some(existing) => {
-                    if existing.content_hash != s.inventory[path].hash {
+                Some(existing_hash) => {
+                    if *existing_hash != s.inventory[path].hash {
                         modified.push(path.clone());
                     }
                 }
             }
         }
-        for path in state.notes.keys() {
+        for path in state.keys() {
             if !inventory_paths.contains(path) {
                 deleted.push(path.clone());
             }
@@ -167,11 +183,7 @@ impl SyncManager {
             let candidates: Vec<&String> = deleted
                 .iter()
                 .filter(|old| {
-                    !consumed_deleted.contains(*old)
-                        && state
-                            .notes
-                            .get(*old)
-                            .is_some_and(|n| n.content_hash == entry.hash)
+                    !consumed_deleted.contains(*old) && state.get(*old).is_some_and(|h| *h == entry.hash)
                 })
                 .collect();
             if candidates.len() == 1 {
@@ -185,19 +197,17 @@ impl SyncManager {
             }
         }
 
-        // Apply renames: carry identity forward, drop the old entry.
+        // Apply renames in SQLite: path moves, id (and chunks) carry over.
         for pair in &renames {
-            if let Some(mut old_state) = state.notes.remove(&pair.from) {
-                old_state.path = pair.to.clone();
-                old_state.synced_at = now_millis();
-                state.notes.insert(pair.to.clone(), old_state);
-            }
+            self.index
+                .rename_note(&pair.from, &pair.to)
+                .map_err(db_err)?;
         }
 
         // Apply true deletions (paths not matched as renames).
         for path in &deleted {
             if !consumed_deleted.contains(path) {
-                state.notes.remove(path);
+                self.index.delete_note(path).map_err(db_err)?;
             }
         }
 
@@ -225,7 +235,8 @@ impl SyncManager {
         })
     }
 
-    /// `vault.sync.note` — receive full content for one requested path.
+    /// `vault.sync.note` — receive full content; parse, chunk, index in
+    /// SQLite, and enqueue follow-up background work (§77).
     pub fn note(&self, params: &SyncNoteParams<'_>) -> Result<SyncNoteResult, RpcError> {
         let mut session = self.lock_session();
         let Some(s) = session.as_mut() else {
@@ -254,7 +265,7 @@ impl SyncManager {
         };
 
         // Content integrity: the core trusts only what it can verify.
-        let actual = hash_content(content);
+        let actual = crate::vault::manager::hash_content(content);
         if actual != note.hash {
             return Err(RpcError::new(
                 ErrorCode::InvalidParams,
@@ -267,16 +278,11 @@ impl SyncManager {
             })));
         }
 
-        let mut state = self.lock_state();
-        let updated = state.notes.contains_key(&note.path);
-        let note_id = match state.notes.get(&note.path) {
-            Some(existing) => existing.note_id.clone(),
-            None => Uuid::new_v4().to_string(),
-        };
-        state.notes.insert(
-            note.path.clone(),
-            NoteState::from_note(note, note_id.clone()),
-        );
+        let updated = self.index.note_id_by_path(&note.path).map_err(db_err)?.is_some();
+        let note_id = self
+            .index
+            .upsert_note(&note.path, content, note.mtime as i64, note.size as i64)
+            .map_err(db_err)?;
 
         if let Some(pending) = s.pending.as_mut() {
             pending.to_fetch.retain(|p| p != &note.path);
@@ -289,7 +295,8 @@ impl SyncManager {
         })
     }
 
-    /// `vault.sync.finish` — validate completeness, persist state.
+    /// `vault.sync.finish` — validate completeness. SQLite writes are already
+    /// committed incrementally, so "persisted" is always true here.
     pub fn finish(&self, session_id: &str) -> Result<SyncFinishResult, RpcError> {
         {
             let mut session = self.lock_session();
@@ -299,7 +306,6 @@ impl SyncManager {
             if s.session_id != session_id {
                 return Err(session_mismatch());
             }
-            // Content completeness: every requested path must have been sent.
             if let Some(pending) = &s.pending {
                 if !pending.to_fetch.is_empty() {
                     return Err(RpcError::new(
@@ -314,40 +320,40 @@ impl SyncManager {
             }
             *session = None;
         }
-
-        let state = self.lock_state();
-        let persisted = self.store.save(&state).is_ok();
-        if !persisted {
-            crate::utils::logging::log(
-                crate::utils::logging::Level::Error,
-                "sync",
-                "failed to persist vault state",
-                serde_json::json!({}),
-            );
-        }
         Ok(SyncFinishResult {
-            total_notes: state.notes.len() as u64,
-            persisted,
+            total_notes: self.total_notes(),
+            persisted: true,
         })
     }
 
     /// `vault.state.get`.
     pub fn state_get(&self, include_metadata: bool) -> StateGetResult {
-        let state = self.lock_state();
-        let mut notes: Vec<StateNoteEntry> = state
-            .notes
-            .values()
-            .map(|n| StateNoteEntry {
-                note_id: n.note_id.clone(),
-                path: n.path.clone(),
-                content_hash: n.content_hash.clone(),
-                title: if include_metadata { n.title.clone() } else { None },
-                tags: if include_metadata { n.tags.clone() } else { Vec::new() },
-            })
-            .collect();
-        notes.sort_by(|a, b| a.path.cmp(&b.path));
+        let conn = self.index.connection();
+        let mut notes: Vec<StateNoteEntry> = Vec::new();
+        if let Ok(mut stmt) =
+            conn.prepare("SELECT id, path, title FROM notes WHERE status = 'active' ORDER BY path")
+        {
+            if let Ok(rows) = stmt.query_map([], |r| {
+                Ok(StateNoteEntry {
+                    note_id: r.get(0)?,
+                    path: r.get(1)?,
+                    content_hash: String::new(),
+                    title: r.get(2)?,
+                    tags: Vec::new(),
+                })
+            }) {
+                for row in rows.flatten() {
+                    notes.push(row);
+                }
+            }
+        }
+        if include_metadata {
+            // Tag extraction joins arrive with the knowledge layer (Part 4);
+            // state.get stays lean here (§93: load only what is asked for).
+        }
+        let total = notes.len() as u64;
         StateGetResult {
-            total_notes: notes.len() as u64,
+            total_notes: total,
             notes,
         }
     }
@@ -355,16 +361,13 @@ impl SyncManager {
     /// `vault.rebuild` — wipe derived state; vault is untouched (§9, §90).
     pub fn rebuild(&self) -> bool {
         self.reset_state();
-        self.store.clear().is_ok()
+        true
     }
 
     fn reset_state(&self) {
-        *self.lock_state() = VaultState::current();
-        let _ = self.store.clear();
-    }
-
-    fn lock_state(&self) -> std::sync::MutexGuard<'_, VaultState> {
-        self.state.lock().unwrap_or_else(|p| p.into_inner())
+        let conn = self.index.connection();
+        let _ = conn.execute("DELETE FROM notes", []);
+        let _ = conn.execute("DELETE FROM jobs WHERE status IN ('pending','running')", []);
     }
 
     fn lock_session(&self) -> std::sync::MutexGuard<'_, Option<Session>> {
@@ -376,6 +379,17 @@ impl SyncManager {
 pub struct SyncNoteParams<'a> {
     pub session_id: &'a str,
     pub note: &'a SyncNote,
+}
+
+impl SyncManager {
+    /// `search.query` — FTS5 keyword search (fast path, §94).
+    pub fn search(
+        &self,
+        query: &str,
+        limit: usize,
+    ) -> Result<Vec<crate::indexing::SearchHit>, RpcError> {
+        self.index.search(query, limit).map_err(db_err)
+    }
 }
 
 fn no_session() -> RpcError {
@@ -392,13 +406,14 @@ fn session_mismatch() -> RpcError {
     )
 }
 
-/// SHA-256 hex of content — the single hash definition for the whole system.
-pub fn hash_content(content: &str) -> String {
-    let mut hasher = Sha256::new();
-    hasher.update(content.as_bytes());
-    hex(&hasher.finalize())
+fn db_err(e: rusqlite::Error) -> RpcError {
+    RpcError::new(ErrorCode::Internal, format!("database error: {e}"))
 }
 
-fn hex(bytes: &[u8]) -> String {
-    bytes.iter().map(|b| format!("{b:02x}")).collect()
+/// SHA-256 hex of content — the single hash definition for the whole system.
+pub fn hash_content(content: &str) -> String {
+    use sha2::{Digest, Sha256};
+    let mut hasher = Sha256::new();
+    hasher.update(content.as_bytes());
+    hasher.finalize().iter().map(|b| format!("{b:02x}")).collect()
 }

@@ -5,9 +5,16 @@ use sovereign_core::dispatch::{dispatch, DispatchState, Outcome};
 use sovereign_core::protocol::{Envelope, ErrorCode, PROTOCOL_VERSION};
 use sovereign_core::vault::manager::SyncManager;
 
-/// Fresh manager over a throwaway data dir (dispatch tests do not persist).
+/// Fresh manager over a unique throwaway data dir (tests run in parallel).
 fn vault() -> std::sync::Arc<SyncManager> {
-    let dir = std::env::temp_dir().join(format!("sv-dispatch-{}", std::process::id()));
+    let dir = std::env::temp_dir().join(format!(
+        "sv-dispatch-{}-{}",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .subsec_nanos()
+    ));
     std::fs::create_dir_all(&dir).ok();
     SyncManager::new(&dir)
 }

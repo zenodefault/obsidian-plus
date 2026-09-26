@@ -1,3 +1,4 @@
-//! Persistence layer (Part 2: sync state; Part 3 adds the SQLite database).
+//! Persistence layer: SQLite is the single store for all derived state (§8).
 
-pub mod state_store;
+pub mod db;
+pub mod schema;
