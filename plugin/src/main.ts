@@ -2,7 +2,12 @@
  * Sovereign Second Brain — Obsidian plugin entry point.
  *
  * Deliberately thin (PLAN.md §4.1): lifecycle wiring only. All intelligence
- * lives in the core process; UI surfaces come in a later workstream.
+ * lives in the core process.
+ *
+ * UI surfaces (Workstream: overlay + graph + setup):
+ * - `SovereignOverlayModal` — hotkey popup hosting the full brain panel.
+ * - `SovereignGraphView` — left-sidebar knowledge graph.
+ * - `SetupWizardModal` — first-run onboarding.
  */
 
 import { Plugin, WorkspaceLeaf } from "obsidian";
@@ -14,8 +19,15 @@ import { DEFAULT_SETTINGS, SovereignBrainSettings } from "./settings/settings";
 import { buildInventory, readNote } from "./vault/inventory";
 import { runSync, SyncAbortedError } from "./vault/sync";
 import { createVaultWatcher } from "./vault/attach";
-import { SovereignSidebarView, VIEW_TYPE_SOVEREIGN_SIDEBAR, SidebarServices } from "./views/SovereignSidebarView";
 import { SovereignBrainSettingTab } from "./settings/SettingTab";
+import {
+  openSovereignOverlay,
+} from "./views/SovereignOverlayModal";
+import {
+  SovereignGraphView,
+  VIEW_TYPE_SOVEREIGN_GRAPH,
+} from "./views/SovereignGraphView";
+import { SetupWizardModal } from "./onboarding/SetupWizardModal";
 import {
   RealBrainDataService,
   daemonClient,
@@ -36,23 +48,45 @@ export default class SovereignSecondBrainPlugin extends Plugin {
   async onload(): Promise<void> {
     await this.loadSettings();
 
-    // Register primary sidebar panel view with the real data services
+    // Knowledge graph leaf (left sidebar, own ribbon icon).
     this.registerView(
-      VIEW_TYPE_SOVEREIGN_SIDEBAR,
-      (leaf: WorkspaceLeaf) => new SovereignSidebarView(leaf, this.sidebarServices())
+      VIEW_TYPE_SOVEREIGN_GRAPH,
+      (leaf: WorkspaceLeaf) => new SovereignGraphView(leaf, this),
     );
 
-    // Ribbon icon to toggle/reveal sidebar
-    this.addRibbonIcon("brain", "Sovereign Second Brain", () => {
-      void this.activateView();
+    // Ribbon: brain icon → hotkey overlay.
+    this.addRibbonIcon("brain", "Sovereign Brain (overlay)", () => {
+      this.openOverlay();
     });
 
-    // Command palette action
+    // Ribbon: fork icon → knowledge graph in the left sidebar.
+    this.addRibbonIcon("git-fork", "Sovereign knowledge graph", () => {
+      void this.activateGraphView();
+    });
+
+    // Hotkey-openable overlay (default Ctrl/Cmd+Shift+B; rebindable).
     this.addCommand({
-      id: "open-sovereign-sidebar",
-      name: "Open Sovereign Brain sidebar",
+      id: "open-sovereign-overlay",
+      name: "Open Sovereign Brain",
+      hotkeys: [{ modifiers: ["Mod", "Shift"], key: "b" }],
       callback: () => {
-        void this.activateView();
+        this.openOverlay();
+      },
+    });
+
+    this.addCommand({
+      id: "open-sovereign-graph",
+      name: "Open knowledge graph",
+      callback: () => {
+        void this.activateGraphView();
+      },
+    });
+
+    this.addCommand({
+      id: "run-sovereign-setup",
+      name: "Run setup wizard",
+      callback: () => {
+        new SetupWizardModal(this.app, this).open();
       },
     });
 
@@ -61,23 +95,38 @@ export default class SovereignSecondBrainPlugin extends Plugin {
 
     // Never block Obsidian startup on the core (PLAN.md §91).
     void this.startDaemon();
+
+    // First-run: open the setup wizard once, after the workspace settles.
+    if (!this.settings.onboardingComplete) {
+      this.app.workspace.onLayoutReady(() => {
+        new SetupWizardModal(this.app, this).open();
+      });
+    }
   }
 
-  async activateView(): Promise<void> {
+  /** Open the overlay popup with the current services. */
+  private openOverlay(): void {
+    openSovereignOverlay(this.app, this, {
+      brain: this.brainData(),
+      operations: this.operationService(),
+    });
+  }
+
+  /** Reveal (or create) the knowledge graph leaf in the left sidebar. */
+  private async activateGraphView(): Promise<void> {
     const { workspace } = this.app;
-    let leaf = workspace.getLeavesOfType(VIEW_TYPE_SOVEREIGN_SIDEBAR)[0];
-    if (!leaf) {
-      const rightLeaf = workspace.getRightLeaf(false);
-      if (rightLeaf) {
-        await rightLeaf.setViewState({
-          type: VIEW_TYPE_SOVEREIGN_SIDEBAR,
-          active: true,
-        });
-        leaf = rightLeaf;
-      }
+    const existing = workspace.getLeavesOfType(VIEW_TYPE_SOVEREIGN_GRAPH)[0];
+    if (existing) {
+      workspace.revealLeaf(existing);
+      return;
     }
-    if (leaf) {
-      workspace.revealLeaf(leaf);
+    const leftLeaf = workspace.getLeftLeaf(false);
+    if (leftLeaf) {
+      await leftLeaf.setViewState({
+        type: VIEW_TYPE_SOVEREIGN_GRAPH,
+        active: true,
+      });
+      workspace.revealLeaf(leftLeaf);
     }
   }
 
@@ -92,17 +141,35 @@ export default class SovereignSecondBrainPlugin extends Plugin {
     return this.daemon;
   }
 
+  /** Lazily start the daemon if it isn't running (wizard re-entry path). */
+  async ensureDaemon(): Promise<void> {
+    if (this.daemon && this.daemon.getStatus() === "running") return;
+    await this.startDaemon();
+  }
+
+  /**
+   * A fresh client closure bound to the current daemon. Used by surfaces
+   * that need raw protocol access (settings model status, wizard).
+   */
+  getClientFactory(): () => ReturnType<typeof daemonClient> | null {
+    return () => (this.daemon ? daemonClient(this.daemon) : null);
+  }
+
   /** Services wired to the live daemon; null-client closures when offline. */
-  private sidebarServices(): SidebarServices {
+  private brainData(): RealBrainDataService {
     this.brain =
       this.brain ?? new RealBrainDataService(() => (this.daemon ? daemonClient(this.daemon) : null));
-    if (!this.operations && this.app) {
+    return this.brain;
+  }
+
+  private operationService(): OperationService {
+    if (!this.operations) {
       this.operations = new OperationService(
         () => (this.daemon ? daemonClient(this.daemon) : null),
         obsidianVaultBridge(this.app.vault),
       );
     }
-    return { brain: this.brain, operations: this.operations };
+    return this.operations;
   }
 
   /** Trigger an incremental sync (coalesced if one is already running). */
@@ -163,7 +230,7 @@ export default class SovereignSecondBrainPlugin extends Plugin {
     if (!binaryPath) {
       console.warn(
         "[sovereign] core binary not found — build core/ (scripts/build.sh) " +
-          "or set coreBinaryPath in plugin settings. The sidebar will show offline states.",
+          "or set coreBinaryPath in plugin settings. UI surfaces show offline states.",
       );
       return;
     }

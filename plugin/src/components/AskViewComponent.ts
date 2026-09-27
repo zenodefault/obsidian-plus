@@ -62,6 +62,11 @@ export class AskViewComponent {
     void this.performSearch(query);
   }
 
+  /** Place keyboard focus in the ask input without disturbing its content. */
+  focusInput(): void {
+    this.inputEl.focus();
+  }
+
   private async performSearch(query: string): Promise<void> {
     this.resultContainerEl.empty();
     this.askButton.disabled = true;

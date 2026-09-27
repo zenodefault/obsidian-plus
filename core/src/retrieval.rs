@@ -157,7 +157,14 @@ pub fn search(
     }
 
     let mut hits: Vec<HybridHit> = best.into_values().collect();
-    hits.sort_by(|a, b| b.score.partial_cmp(&a.score).unwrap_or(std::cmp::Ordering::Equal));
+    // Score desc, then chunk_id asc — a total order so equal-scoring hits
+    // come back in a stable, deterministic sequence (§42).
+    hits.sort_by(|a, b| {
+        b.score
+            .partial_cmp(&a.score)
+            .unwrap_or(std::cmp::Ordering::Equal)
+            .then_with(|| a.chunk_id.cmp(&b.chunk_id))
+    });
     hits.truncate(limit);
     Ok(hits)
 }

@@ -1,16 +1,21 @@
-import { ItemView, WorkspaceLeaf, TFile } from "obsidian";
-import { RealBrainDataService, BrainDataService } from "../services/brainDataService";
-import { OperationService } from "../services/operationService";
-import { CurrentNoteContextCard } from "../components/CurrentNoteContextCard";
-import { AskViewComponent } from "../components/AskViewComponent";
-import { MemoryViewComponent } from "../components/MemoryViewComponent";
-import { InboxViewComponent } from "../components/InboxViewComponent";
-import { ActionsViewComponent } from "../components/ActionsViewComponent";
-import { BrainHealthComponent } from "../components/BrainHealthComponent";
-import { ActivityViewComponent } from "../components/ActivityViewComponent";
-import { SettingsViewComponent } from "../components/SettingsViewComponent";
+/**
+ * BrainPanel — the full brain UI (tabs, context card, status bar) as a
+ * standalone component. Originally the body of the sidebar view; now hosted
+ * by the hotkey overlay (Workstream: overlay popup). The tab components are
+ * reused unchanged — this file only composes them.
+ */
 
-export const VIEW_TYPE_SOVEREIGN_SIDEBAR = "sovereign-sidebar-view";
+import { App, TFile } from "obsidian";
+import type { BrainDataService } from "../services/brainDataService";
+import type { OperationService } from "../services/operationService";
+import { CurrentNoteContextCard } from "./CurrentNoteContextCard";
+import { AskViewComponent } from "./AskViewComponent";
+import { MemoryViewComponent } from "./MemoryViewComponent";
+import { InboxViewComponent } from "./InboxViewComponent";
+import { ActionsViewComponent } from "./ActionsViewComponent";
+import { BrainHealthComponent } from "./BrainHealthComponent";
+import { ActivityViewComponent } from "./ActivityViewComponent";
+import { SettingsViewComponent } from "./SettingsViewComponent";
 
 export type SovereignTab =
   | "Ask"
@@ -21,47 +26,56 @@ export type SovereignTab =
   | "Activity"
   | "Settings";
 
-/** Provide the brain service from the plugin's daemon (wired in main.ts). */
-export interface SidebarServices {
+export const SOVEREIGN_TABS: SovereignTab[] = [
+  "Ask",
+  "Memory",
+  "Inbox",
+  "Actions",
+  "Brain Health",
+  "Activity",
+  "Settings",
+];
+
+export interface BrainPanelServices {
   brain: BrainDataService;
   operations: OperationService | null;
 }
 
-export class SovereignSidebarView extends ItemView {
+export interface BrainPanelOptions {
+  /** Initial active tab (e.g. restored from the last overlay session). */
+  initialTab?: SovereignTab;
+  /** Called whenever the user switches tabs (so hosts can persist it). */
+  onTabChanged?: (tab: SovereignTab) => void;
+}
+
+export class BrainPanel {
   private activeTab: SovereignTab = "Ask";
   private contextCard!: CurrentNoteContextCard;
   private tabContentEl!: HTMLElement;
   private navButtons: Map<SovereignTab, HTMLButtonElement> = new Map();
   private statusBarEl!: HTMLElement;
   private askComponent?: AskViewComponent;
-  private services: SidebarServices;
+  private statusRefreshTimer?: number;
 
-  constructor(leaf: WorkspaceLeaf, services?: SidebarServices) {
-    super(leaf);
-    this.services =
-      services ??
-      ({
-        brain: new RealBrainDataService(() => null),
-        operations: null,
-      } satisfies SidebarServices);
+  constructor(
+    private rootEl: HTMLElement,
+    private app: App,
+    private services: BrainPanelServices,
+    private options: BrainPanelOptions = {},
+  ) {
+    if (options.initialTab) this.activeTab = options.initialTab;
+    this.build();
   }
 
-  getViewType(): string {
-    return VIEW_TYPE_SOVEREIGN_SIDEBAR;
+  /** The currently displayed tab. */
+  get currentTab(): SovereignTab {
+    return this.activeTab;
   }
 
-  getDisplayText(): string {
-    return "Sovereign Brain";
-  }
-
-  getIcon(): string {
-    return "brain";
-  }
-
-  async onOpen(): Promise<void> {
-    const root = this.containerEl.children[1] as HTMLElement;
+  private build(): void {
+    const root = this.rootEl;
     root.empty();
-    root.addClass("sovereign-sidebar-root");
+    root.addClass("sovereign-panel-root");
 
     this.buildHeader(root);
     this.buildCurrentNoteContext(root);
@@ -71,22 +85,21 @@ export class SovereignSidebarView extends ItemView {
     this.statusBarEl = root.createDiv({ cls: "sovereign-bottom-statusbar" });
 
     this.renderActiveTab();
-    await this.updateStatusBar();
+    void this.updateStatusBar();
 
-    // Listen to active note changes
-    this.registerEvent(
-      this.app.workspace.on("file-open", (file) => {
-        void this.onActiveFileChanged(file);
-      })
-    );
-
-    // Initial context load with current active file
-    const activeFile = this.app.workspace.getActiveFile();
-    void this.onActiveFileChanged(activeFile);
+    // Keep the status bar honest while the panel is open: refresh on a slow
+    // cadence rather than on every event (§91: never busy-wait).
+    this.statusRefreshTimer = window.setInterval(() => {
+      void this.updateStatusBar();
+    }, 30_000);
   }
 
-  async onClose(): Promise<void> {
-    // Teardown
+  /** Detach timers. The DOM lives with the host; nothing else to clean. */
+  destroy(): void {
+    if (this.statusRefreshTimer !== undefined) {
+      window.clearInterval(this.statusRefreshTimer);
+      this.statusRefreshTimer = undefined;
+    }
   }
 
   private buildHeader(parentEl: HTMLElement): void {
@@ -98,7 +111,7 @@ export class SovereignSidebarView extends ItemView {
       cls: "sovereign-app-title",
     });
 
-    // Permanent LOCAL ONLY status indicator badge
+    // Permanent LOCAL ONLY status indicator badge.
     const badge = titleRow.createDiv({ cls: "sovereign-local-badge" });
     badge.createSpan({ text: "●", cls: "sovereign-dot-indicator" });
     badge.createSpan({ text: "LOCAL ONLY", cls: "sovereign-badge-text" });
@@ -118,17 +131,7 @@ export class SovereignSidebarView extends ItemView {
 
   private buildNavigationTabs(parentEl: HTMLElement): void {
     const navBar = parentEl.createDiv({ cls: "sovereign-nav-bar" });
-    const tabs: SovereignTab[] = [
-      "Ask",
-      "Memory",
-      "Inbox",
-      "Actions",
-      "Brain Health",
-      "Activity",
-      "Settings",
-    ];
-
-    for (const tab of tabs) {
+    for (const tab of SOVEREIGN_TABS) {
       const btn = navBar.createEl("button", {
         text: tab,
         cls: `sovereign-nav-tab ${this.activeTab === tab ? "is-active" : ""}`,
@@ -148,6 +151,18 @@ export class SovereignSidebarView extends ItemView {
     });
 
     this.renderActiveTab();
+    this.options.onTabChanged?.(tab);
+  }
+
+  /** Focus the Ask input (overlay opens into a ready-to-type state). */
+  focusAskInput(): void {
+    if (this.activeTab === "Ask") {
+      this.askComponent?.focusInput();
+    } else {
+      this.switchTab("Ask");
+      // switchTab re-renders synchronously, so the input exists now.
+      this.askComponent?.focusInput();
+    }
   }
 
   private renderActiveTab(): void {
@@ -203,6 +218,7 @@ export class SovereignSidebarView extends ItemView {
   }
 
   private async updateStatusBar(): Promise<void> {
+    if (!this.statusBarEl.isConnected) return;
     this.statusBarEl.empty();
 
     try {
@@ -246,15 +262,14 @@ export class SovereignSidebarView extends ItemView {
         cls: "sovereign-sb-label",
       });
     }
-
-    this.statusBarEl.addEventListener("click", () => this.switchTab("Brain Health"));
   }
 
-  private async onActiveFileChanged(file: TFile | null): Promise<void> {
+  /** Refresh the context card for the given active file. */
+  async refreshContext(file: TFile | null): Promise<void> {
     const path = file ? file.path : undefined;
     try {
       const context = await this.services.brain.getNoteContext(path);
-      this.contextCard.render(context);
+      if (this.contextCard) this.contextCard.render(context);
     } catch {
       // Context card stays as-is on transient failures (§31).
     }

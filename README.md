@@ -39,6 +39,24 @@ Implementation follows the workstream order in [PLAN.md](PLAN.md) (UI/UX workstr
 
 Requirements: Rust (stable, via rustup), Node.js ≥ 20.
 
+## Installing into Obsidian
+
+```bash
+./scripts/install.sh              # build + install + enable in every vault
+./scripts/install.sh --no-build   # reuse the current build output
+./scripts/install.sh --list       # show the vaults Obsidian has registered
+./scripts/install.sh --vault /path/to/vault   # install into one vault
+./scripts/install.sh --uninstall  # remove from every vault
+```
+
+The installer reads Obsidian's own vault registry (`obsidian.json` in the
+app config directory), copies the plugin bundle **and** the `sovereign-core`
+binary into each vault, and enables the plugin in
+`community-plugins.json`. Re-running is safe. Reload Obsidian
+(Ctrl/Cmd+R) after installing. If the plugin does not appear, turn off
+restricted mode once under Settings → Community plugins — Obsidian hides
+all community plugins until then, and that step cannot be automated.
+
 ## Privacy
 
 The system contains no cloud clients, no telemetry, no accounts and no network
