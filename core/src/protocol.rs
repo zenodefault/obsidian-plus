@@ -146,8 +146,8 @@ pub struct ShutdownResult {
 
 // Vault sync protocol types re-exported for dispatch convenience.
 pub use crate::vault::types::{
-    RebuildParams, RebuildResult, StateGetParams, SyncBatchParams, SyncBeginParams,
-    SyncCommitParams, SyncFinishParams, SyncNote, SyncNoteParams,
+    ModelsConfigureParams, ModelsConfigureResult, RebuildParams, RebuildResult, StateGetParams,
+    SyncBatchParams, SyncBeginParams, SyncCommitParams, SyncFinishParams, SyncNote, SyncNoteParams,
 };
 
 /// Params of `search.query` (§42 fast path; semantic retrieval arrives in

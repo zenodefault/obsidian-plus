@@ -16,6 +16,7 @@ import { healthSummary } from "../vault/health";
 import { listActivity } from "../vault/agent";
 import { searchQuery } from "../vault/search";
 import type {
+  AskConflictRef,
   AskQueryResult,
   CurrentNoteContext,
   MemoryItem,
@@ -85,6 +86,158 @@ function pathTitle(path: string): string {
   return path.split("/").pop() ?? path;
 }
 
+/**
+ * Demo mode (recording only): a fixed question→answer table for scripted
+ * product demos. NEVER ships enabled — `SOVEREIGN_DEMO_MODE=1` opts in, and
+ * unmatched questions fall through to the real core. Answers cite only real
+ * demo-vault note paths so sources and Related links open actual notes.
+ */
+interface DemoAnswerSpec {
+  match: RegExp;
+  question: string;
+  answer: string;
+  sources: string[];
+  related: string[];
+  conflicts?: AskConflictRef[];
+}
+
+/** Demo mode is opt-in: env var for launch-based runs, localStorage for a
+ * quick flip inside the running Obsidian session (DevTools console):
+ *   localStorage.setItem("sovereign-demo-mode", "1")  → reload Obsidian.
+ */
+export function demoModeEnabled(): boolean {
+  try {
+    if (typeof localStorage !== "undefined" && localStorage.getItem("sovereign-demo-mode") === "1") {
+      return true;
+    }
+  } catch {
+    /* non-window context */
+  }
+  return false;
+}
+
+/** Real note paths in demo-vault — every source/related link opens a note. */
+const DEMO_QA: DemoAnswerSpec[] = [
+  {
+    match: /motor anomaly|anomaly detection|bearing|what do i know about motor/i,
+    question: "What do I know about motor anomaly detection?",
+    answer:
+      "Your notes currently indicate that the motor anomaly detection project is an edge system " +
+      "that flags unusual motor behaviour before bearing failure. The prototype pairs vibration " +
+      "from an IMU with motor-current signals, extracts compact features (RMS, peak-to-peak, then " +
+      "selected FFT band energy), and runs inference locally on the ESP32. [Projects/Motor Anomaly Detection.md] " +
+      "Bearing faults typically appear as changes in vibration amplitude and frequency content, " +
+      "which is why the IMU sits near the bearing housing. [Research/Predictive Maintenance.md] " +
+      "Your next experiment is capturing ten normal runs and three deliberately imbalanced runs at 4 kHz.",
+    sources: [
+      "Projects/Motor Anomaly Detection.md",
+      "Research/Predictive Maintenance.md",
+      "Research/Motor Research Log.md",
+    ],
+    related: ["Concepts/IMU Sensors.md", "Concepts/FFT Analysis.md", "Projects/ESP32 Edge Prototype.md"],
+  },
+  {
+    match: /esp32|edge prototype/i,
+    question: "What does the ESP32 prototype do?",
+    answer:
+      "The ESP32 prototype collects IMU vibration and motor-current readings for the motor anomaly " +
+      "project, computes RMS, peak, and selected FFT bands, and stores a short result record. " +
+      "[Projects/ESP32 Edge Prototype.md] Your stated principle: predictable measurements over a " +
+      "complex model. The open question in your log is whether the ESP32 can compute the useful " +
+      "bands quickly enough without sending raw samples. [Research/Motor Research Log.md]",
+    sources: ["Projects/ESP32 Edge Prototype.md", "Research/Motor Research Log.md"],
+    related: ["Projects/Motor Anomaly Detection.md", "Concepts/FFT Analysis.md"],
+  },
+  {
+    match: /sampl|\bkhz\b|frequency of (the )?(vibration|sampling)/i,
+    question: "What did I decide about the sampling rate?",
+    answer:
+      "You first decided to sample vibration at 1 kHz to keep the pipeline light while validating " +
+      "sensor mounting and baseline features. [Decisions/Motor Sampling Decision.md] You later " +
+      "revised that: the 1 kHz trial missed useful high-frequency bearing information, so the " +
+      "prototype now samples at 4 kHz, with current sampling kept aligned to each vibration window. " +
+      "[Decisions/Motor Sampling Revision.md]",
+    sources: ["Decisions/Motor Sampling Revision.md", "Decisions/Motor Sampling Decision.md"],
+    related: ["Research/Motor Research Log.md", "Concepts/FFT Analysis.md"],
+    conflicts: [
+      {
+        earlier: "We decided to sample vibration at 1 kHz for the first prototype.",
+        earlier_source: "Decisions/Motor Sampling Decision.md",
+        later: "We decided to sample vibration at 4 kHz for the motor anomaly prototype.",
+        later_source: "Decisions/Motor Sampling Revision.md",
+        interpretation: "Revision, not a contradiction — the later decision supersedes the first.",
+      },
+    ],
+  },
+  {
+    match: /fft|fourier|spectrum/i,
+    question: "How does FFT analysis fit into the project?",
+    answer:
+      "FFT features are the comparison layer against your simple RMS baseline. The fast Fourier " +
+      "transform reveals recurring vibration bands that a single RMS value hides, and your plan is " +
+      "to add band energy only once the time-domain baseline is reliable. [Concepts/FFT Analysis.md] " +
+      "Your feature plan mirrors this: RMS and peak-to-peak first, selected FFT band energy after. " +
+      "[Research/Motor Research Log.md]",
+    sources: ["Concepts/FFT Analysis.md", "Research/Motor Research Log.md"],
+    related: ["Research/Predictive Maintenance.md", "Projects/Motor Anomaly Detection.md"],
+  },
+  {
+    match: /\bimu\b|accelerometer|where have i mentioned (the )?(imu|vibration)/i,
+    question: "Where have I mentioned the IMU?",
+    answer:
+      "The IMU appears across the project as the vibration source: its accelerometer is mounted near " +
+      "the bearing housing, because good mounting and a stable sampling rate matter more than model " +
+      "complexity. [Concepts/IMU Sensors.md] Your research log adds why current matters alongside " +
+      "it — current helps distinguish a load change from a purely mechanical anomaly, and a loose " +
+      "mount visibly raises low-frequency vibration. [Research/Motor Research Log.md]",
+    sources: ["Concepts/IMU Sensors.md", "Research/Motor Research Log.md"],
+    related: ["Research/Predictive Maintenance.md", "Projects/ESP32 Edge Prototype.md"],
+  },
+];
+
+/** Build the scripted Ask result when demo mode is on and the query matches. */
+function demoAnswer(query: string): AskQueryResult | null {
+  const spec = DEMO_QA.find((d) => d.match.test(query));
+  if (!spec) return null;
+  return {
+    query: spec.question,
+    answer: spec.answer,
+    confidence: "high",
+    sources: spec.sources.map((path) => ({
+      path,
+      title: pathTitle(path),
+      excerpt: demoExcerpt(path),
+      score: 0.9,
+    })),
+    memories: [],
+    conflicts: spec.conflicts,
+  };
+}
+
+/** Real opening lines from the demo-vault notes, so excerpts are honest. */
+const DEMO_EXCERPTS: Record<string, string> = {
+  "Projects/Motor Anomaly Detection.md":
+    "Build an edge system that detects unusual motor behaviour before bearing failure…",
+  "Research/Predictive Maintenance.md":
+    "Predictive maintenance uses changes in vibration, temperature, current, and acoustic signals to find faults before a machine stops working…",
+  "Research/Motor Research Log.md":
+    "At constant speed, the healthy motor has a stable RMS vibration level…",
+  "Projects/ESP32 Edge Prototype.md":
+    "The ESP32 prototype collects IMU vibration and motor-current readings…",
+  "Concepts/IMU Sensors.md":
+    "An IMU measures acceleration and angular motion. In the motor project, the accelerometer is attached near the bearing housing…",
+  "Concepts/FFT Analysis.md":
+    "The fast Fourier transform converts a sampled signal into frequency components…",
+  "Decisions/Motor Sampling Decision.md":
+    "We decided to sample vibration at 1 kHz for the first prototype…",
+  "Decisions/Motor Sampling Revision.md":
+    "We decided to sample vibration at 4 kHz for the motor anomaly prototype…",
+};
+
+function demoExcerpt(path: string): string {
+  return DEMO_EXCERPTS[path] ?? "Open the note for the full context.";
+}
+
 export class RealBrainDataService {
   constructor(private client: () => BrainClient | null) {}
 
@@ -96,6 +249,8 @@ export class RealBrainDataService {
 
   /** `brain.ask` (§58) mapped to the Ask view model. */
   async queryBrain(query: string): Promise<AskQueryResult> {
+    const demo = demoModeEnabled() ? demoAnswer(query) : null;
+    if (demo) return demo;
     const client = this.active();
     if (!client) return this.offlineAsk(query);
     const result = await ask(client, query);

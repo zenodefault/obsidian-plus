@@ -172,3 +172,37 @@ pub struct RebuildResult {
     pub cleared: bool,
     pub message: String,
 }
+
+/// `models.configure`: persist the model configuration the core will select
+/// on the next provider use (§74). The core never probes or downloads
+/// anything — the caller (plugin) is responsible for the binary existing.
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
+#[serde(deny_unknown_fields, default)]
+pub struct ModelsConfigureParams {
+    /// `hash` | `cli` | `ollama` (ollama is cli + a plugin-installed shim).
+    pub provider: String,
+    /// Model file path or server-hosted model tag (required for cli/ollama).
+    pub model_path: Option<String>,
+    /// Local model binary to spawn (required for cli/ollama).
+    pub binary_path: Option<String>,
+    /// Base URL of the local model server; passed through to the binary.
+    pub base_url: Option<String>,
+    /// Separate generation model (chat model tag, e.g. `qwen3:4b`). Omitting
+    /// it clears the generation layer; embeddings are unaffected. A chat
+    /// model must never become the embedding model (retrieval quality).
+    pub generation_model_path: Option<String>,
+    /// Generation binary to spawn (e.g. the same Ollama shim).
+    pub generation_binary_path: Option<String>,
+    /// Base URL passed through to the generation binary.
+    pub generation_base_url: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub struct ModelsConfigureResult {
+    pub applied: bool,
+    /// Up-front validation result: the selected provider's honest state
+    /// (InvalidConfig text when the configuration is broken, if detectable
+    /// without spawning anything). Never pretends a broken config is fine.
+    pub validation_error: Option<String>,
+}

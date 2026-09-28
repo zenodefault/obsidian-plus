@@ -1,0 +1,17 @@
+#!/usr/bin/env python3
+import json, sys, urllib.request
+BASE_URL = "http://127.0.0.1:11500"
+req = json.loads(sys.stdin.read() or "{}")
+try:
+    if "texts" in req and isinstance(req["texts"], list):
+        r = urllib.request.Request(BASE_URL + "/api/embed", data=json.dumps({"model": req.get("model"), "input": req["texts"]}).encode(), headers={"Content-Type": "application/json"}, method="POST")
+        out = json.loads(urllib.request.urlopen(r, timeout=60).read().decode())
+        print(json.dumps({"embeddings": out.get("embeddings")}))
+    elif "prompt" in req:
+        r = urllib.request.Request(BASE_URL + "/api/generate", data=json.dumps({"model": req.get("model"), "prompt": req["prompt"], "stream": False}).encode(), headers={"Content-Type": "application/json"}, method="POST")
+        out = json.loads(urllib.request.urlopen(r, timeout=60).read().decode())
+        print(json.dumps({"text": out.get("response", "")}))
+    else:
+        print(json.dumps({"error": "bad request"})); sys.exit(1)
+except Exception as e:
+    print(json.dumps({"error": "shim: " + str(e)})); sys.exit(1)

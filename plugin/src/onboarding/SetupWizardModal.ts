@@ -13,6 +13,7 @@
 
 import { Modal, App, Notice, Setting } from "obsidian";
 import type SovereignSecondBrainPlugin from "../main";
+import { applyBeam } from "../ui/beam";
 import {
   detectCoreBinary,
   probeBinaryPath,
@@ -53,8 +54,15 @@ export class SetupWizardModal extends Modal {
     contentEl.empty();
 
     const frame = contentEl.createDiv({ cls: "sovereign-overlay-frame" });
-    frame.createDiv({ cls: "sovereign-border-trace" });
-    frame.createDiv({ cls: "sovereign-border-glow" });
+    frame.createDiv({ cls: "sovereign-beam-layer" });
+    // Same BorderBeam as the popup, with the user's chosen variant (the
+    // wizard's narrower proportions still win via its own CSS variables).
+    applyBeam(frame, {
+      size: this.plugin.settings.beamSize,
+      color: this.plugin.settings.beamColor,
+      strength: this.plugin.settings.beamStrength,
+      active: true,
+    });
 
     const header = frame.createDiv({ cls: "sovereign-wizard-header" });
     this.stepIndicatorEl = header.createDiv({ cls: "sovereign-wizard-steps" });
@@ -250,58 +258,122 @@ export class SetupWizardModal extends Modal {
     this.addTitle(
       "Local models",
       "Everything runs on this machine. The built-in embedder needs no setup; " +
-        "a local GGUF model is optional.",
+        "a local Ollama or GGUF model is optional and can be linked automatically.",
     );
 
-    if (!this.modelSummary) {
-      // Make sure the daemon had a chance to start with the chosen settings.
-      if (!this.plugin.getDaemon()) {
-        await this.plugin.ensureDaemon();
-      }
-      if (!this.plugin.getDaemon()) {
+    // Paint the full step immediately (nav included), then let the two
+    // probes stream their results in — a slow core or Ollama probe must
+    // never make the step feel frozen.
+    const modelSlot = this.bodyEl.createDiv();
+    this.bodyEl.createEl("p", {
+      text: "Models are never downloaded by this plugin. A local Ollama server " +
+        "is detected and linked automatically when it is running; otherwise a " +
+        "llama.cpp-style binary and GGUF file can be configured in settings.",
+      cls: "sovereign-wizard-footnote",
+    });
+    const ollamaSlot = this.bodyEl.createDiv();
+
+    this.addNav("Next", () => {
+      this.step = 4;
+      this.render();
+    });
+
+    void this.fillModelStatus(modelSlot);
+    await this.renderOllama(ollamaSlot);
+  }
+
+  /** Resolve (or reuse) the model summary from the live core. */
+  private async resolveModelSummary(): Promise<ModelSummary> {
+    if (this.modelSummary) return this.modelSummary;
+    // Make sure the daemon had a chance to start with the chosen settings.
+    if (!this.plugin.getDaemon()) {
+      await this.plugin.ensureDaemon();
+    }
+    const daemon = this.plugin.getDaemon();
+    if (!daemon) {
+      this.modelSummary = offlineModelSummary();
+      return this.modelSummary;
+    }
+    try {
+      const client = this.plugin.getClientFactory()();
+      if (!client || client.getStatus() !== "running") {
         this.modelSummary = offlineModelSummary();
       } else {
-        try {
-          const client = this.plugin.getClientFactory()();
-          if (!client || client.getStatus() !== "running") {
-            this.modelSummary = offlineModelSummary();
-          } else {
-            const status = await client.request<import("../vault/types").ModelStatus>("models.status", {});
-            this.modelSummary = summarizeModelStatus(status);
-          }
-        } catch {
-          this.modelSummary = offlineModelSummary();
-        }
+        const status = await client.request<import("../vault/types").ModelStatus>("models.status", {});
+        this.modelSummary = summarizeModelStatus(status);
       }
+    } catch {
+      this.modelSummary = offlineModelSummary();
     }
+    return this.modelSummary;
+  }
 
-    const s = this.modelSummary;
-    const box = this.bodyEl.createDiv({
+  /** Stream the core's model status into the models step. */
+  private async fillModelStatus(slot: HTMLElement): Promise<void> {
+    const s = await this.resolveModelSummary();
+    if (!slot.isConnected) return;
+    slot.empty();
+
+    const box = slot.createDiv({
       cls: `sovereign-wizard-status ${s.provider === "unknown" ? "is-warn" : "is-ok"}`,
     });
     box.createSpan({ text: s.message, cls: "sovereign-wizard-status-text" });
 
     if (s.total > 0) {
       const pct = Math.floor((s.embedded / s.total) * 100);
-      const meter = this.bodyEl.createDiv({ cls: "sovereign-wizard-meter" });
+      const meter = slot.createDiv({ cls: "sovereign-wizard-meter" });
       const fill = meter.createDiv({ cls: "sovereign-wizard-meter-fill" });
       fill.style.width = `${pct}%`;
-      this.bodyEl.createEl("p", {
+      slot.createEl("p", {
         text: `${s.embedded} of ${s.total} chunks embedded (${pct}%)`,
         cls: "sovereign-wizard-subtitle",
       });
     }
+  }
 
-    this.bodyEl.createEl("p", {
-      text: "Models are never downloaded. To add generation later, configure a " +
-        "local llama.cpp-style binary and GGUF file — the core validates them " +
-        "up front.",
-      cls: "sovereign-wizard-footnote",
+  /** Ollama auto-detect card for the models step. */
+  private async renderOllama(slot: HTMLElement): Promise<void> {
+    const card = slot.createDiv({ cls: "sovereign-wizard-status" });
+    const text = card.createSpan({ cls: "sovereign-wizard-status-text" });
+    text.setText("Checking for a local Ollama server…");
+
+    const { probeOllama } = await import("../services/ollama");
+    const probe = await probeOllama(
+      this.plugin.settings.ollamaBaseUrl || undefined,
+    );
+    // The user may have left the step while the probe was in flight.
+    if (!card.isConnected) return;
+
+    if (!probe.found) {
+      card.addClass("is-idle");
+      text.setText(
+        `No local Ollama at ${probe.baseUrl} — that is fine. Install it from ` +
+          "ollama.com and start it; the plugin links it automatically once it runs.",
+      );
+      return;
+    }
+
+    card.addClass("is-ok");
+    const names = probe.models.map((m) => m.name);
+    text.setText(
+      `Ollama is running at ${probe.baseUrl} with ${names.length} model(s): ` +
+        (names.slice(0, 3).join(", ") + (names.length > 3 ? "…" : "") || "none yet"),
+    );
+
+    const row = slot.createDiv({ cls: "sovereign-wizard-actions" });
+    const linkBtn = row.createEl("button", {
+      text: "Link Ollama to the brain",
+      cls: "mod-cta sovereign-btn-primary",
     });
-
-    this.addNav("Next", () => {
-      this.step = 4;
-      this.render();
+    linkBtn.addEventListener("click", async () => {
+      linkBtn.disabled = true;
+      text.setText("Linking…");
+      const message = await this.plugin.linkOllamaNow();
+      if (!card.isConnected) return; // user left the step mid-link
+      text.setText(message);
+      new Notice(message, 8_000);
+      // Refresh the model summary; the provider may have changed.
+      this.modelSummary = null;
     });
   }
 

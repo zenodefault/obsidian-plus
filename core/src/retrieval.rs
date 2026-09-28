@@ -47,6 +47,15 @@ pub fn search(
     let lexical = index.search(query, limit * 2)?;
 
     // ---- Semantic arm: embed the query, cosine against embedded chunks.
+    // Hash embeddings are a zero-setup lexical expansion aid, not a semantic
+    // language model. Their random collisions can otherwise make an absent
+    // query (for example "iphone 7") look strongly grounded in unrelated
+    // notes. Therefore only a real embedding provider may introduce a new
+    // semantic-only candidate; hash candidates must also be lexical/entity
+    // matches and are merged below.
+    let semantic_only_allowed = provider.name() != "hash";
+    let lexical_chunk_ids: std::collections::HashSet<&str> =
+        lexical.iter().map(|hit| hit.chunk_id.as_str()).collect();
     let query_vec: Vec<f32> = provider
         .embed(&[query.to_string()])
         .map_err(|_| rusqlite::Error::InvalidQuery)?
@@ -77,7 +86,7 @@ pub fn search(
             let (chunk_id, text, heading, blob, note_id, note_path) = row?;
             let vec = blob_to_vector(&blob);
             let sim = cosine(&query_vec, &vec) as f64;
-            if sim > 0.01 {
+            if (semantic_only_allowed || lexical_chunk_ids.contains(chunk_id.as_str())) && sim > 0.01 {
                 semantic.push(HybridHit {
                     note_id,
                     note_path,

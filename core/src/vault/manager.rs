@@ -455,22 +455,41 @@ impl SyncManager {
     pub fn models_status(&self) -> Result<crate::models::ModelStatus, RpcError> {
         let conn = self.index.connection();
         let settings = crate::models::ModelSettings::load(conn);
+        // Report the CONFIGURED provider honestly: a broken cli/ollama
+        // configuration must not masquerade as "cli ok" just because the
+        // spawn path shares a name with the working default.
+        let configured = settings
+            .embedding_provider
+            .clone()
+            .unwrap_or_else(|| "hash".to_string());
         let (provider_name, model_path, binary_path, dimension, validation_error) =
             match crate::models::select_provider(&settings) {
                 Ok(p) => (
-                    p.name().to_string(),
+                    if configured == "ollama" {
+                        "ollama".to_string()
+                    } else {
+                        p.name().to_string()
+                    },
                     settings.embedding_model_path.clone(),
                     settings.embedding_binary_path.clone(),
                     p.dimension(),
                     None,
                 ),
                 Err(e) => (
-                    settings.embedding_provider.clone().unwrap_or_else(|| "hash".to_string()),
+                    configured,
                     settings.embedding_model_path.clone(),
                     settings.embedding_binary_path.clone(),
                     0,
                     Some(e.to_string()),
                 ),
+            };
+        // The generation layer reports its own honest state (a broken chat
+        // model must not taint a working embedding provider, and vice versa).
+        let (generation_model, generation_error) =
+            match crate::models::select_generation_provider(&settings) {
+                Ok(Some(_)) => (settings.generation_model_path.clone(), None),
+                Ok(None) => (None, None),
+                Err(e) => (settings.generation_model_path.clone(), Some(e.to_string())),
             };
         let chunks_total: i64 = conn
             .query_row("SELECT COUNT(*) FROM chunks", [], |r| r.get(0))
@@ -486,6 +505,101 @@ impl SyncManager {
             chunks_total,
             chunks_embedded,
             chunks_pending: chunks_total - chunks_embedded,
+            validation_error,
+            generation_model,
+            generation_error,
+        })
+    }
+
+    /// `models.configure` (§74): persist model settings and report the
+    /// up-front validation state of the new configuration. The core never
+    /// probes the binary beyond an existence check (no downloads, no
+    /// sockets); the plugin is responsible for installing the binary.
+    pub fn models_configure(
+        &self,
+        params: &crate::protocol::ModelsConfigureParams,
+    ) -> Result<crate::protocol::ModelsConfigureResult, RpcError> {
+        let conn = self.index.connection();
+        let provider = params.provider.trim();
+        if provider.is_empty() {
+            return Err(RpcError::new(
+                ErrorCode::InvalidParams,
+                "provider must not be empty",
+            ));
+        }
+        if !matches!(provider, "hash" | "cli" | "ollama") {
+            return Err(RpcError::new(
+                ErrorCode::InvalidParams,
+                format!("unknown provider: {provider} (expected hash, cli or ollama)"),
+            ));
+        }
+
+        let write = |key: &str, value: &Option<String>| -> Result<(), RpcError> {
+            crate::models::ModelSettings::store_key(
+                conn,
+                key,
+                value.as_deref().unwrap_or("").trim(),
+            )
+            .map_err(|e| RpcError::new(ErrorCode::Internal, e.to_string()))
+        };
+
+        write("embedding_provider", &Some(provider.to_string()))?;
+        if provider == "hash" {
+            // Clearing the file-backed keys keeps the settings table honest.
+            write("embedding_model_path", &None)?;
+            write("embedding_binary_path", &None)?;
+            write("embedding_base_url", &None)?;
+        } else {
+            let model = params.model_path.clone().filter(|s| !s.trim().is_empty());
+            let binary = params.binary_path.clone().filter(|s| !s.trim().is_empty());
+            if model.is_none() || binary.is_none() {
+                return Err(RpcError::new(
+                    ErrorCode::InvalidParams,
+                    "model_path and binary_path are required for cli/ollama providers",
+                ));
+            }
+            write("embedding_model_path", &model)?;
+            write("embedding_binary_path", &binary)?;
+            write("embedding_base_url", &params.base_url)?;
+        }
+
+        // Generation layer (optional, independent of embeddings): an empty
+        // value clears it, so un-linking a chat model is the same call with
+        // the generation fields omitted.
+        let gen_model = params
+            .generation_model_path
+            .clone()
+            .filter(|s| !s.trim().is_empty());
+        let gen_binary = params
+            .generation_binary_path
+            .clone()
+            .filter(|s| !s.trim().is_empty());
+        match (gen_model, gen_binary) {
+            (Some(m), Some(b)) => {
+                write("generation_model_path", &Some(m))?;
+                write("generation_binary_path", &Some(b))?;
+                write("generation_base_url", &params.generation_base_url)?;
+            }
+            (None, None) => {
+                write("generation_model_path", &None)?;
+                write("generation_binary_path", &None)?;
+                write("generation_base_url", &None)?;
+            }
+            _ => {
+                return Err(RpcError::new(
+                    ErrorCode::InvalidParams,
+                    "generation_model_path and generation_binary_path must be set together",
+                ));
+            }
+        }
+
+        // Honest up-front validation of the freshly stored configuration.
+        let settings = crate::models::ModelSettings::load(conn);
+        let validation_error = crate::models::select_provider(&settings)
+            .err()
+            .map(|e| e.to_string());
+        Ok(crate::protocol::ModelsConfigureResult {
+            applied: true,
             validation_error,
         })
     }
@@ -568,21 +682,41 @@ impl SyncManager {
             ));
         }
         let settings = crate::models::ModelSettings::load(self.index.connection());
-        let provider: Box<dyn crate::models::ModelProvider> =
+        let embedding_provider: Box<dyn crate::models::ModelProvider> =
             match crate::models::select_provider(&settings) {
                 Ok(p) => p,
                 Err(e) => {
                     crate::utils::logging::log(
                         crate::utils::logging::Level::Warn,
                         "reasoning",
-                        "model unavailable; answering from evidence only",
+                        "embedding model unavailable; retrieving with the built-in embedder",
                         serde_json::json!({ "error": e.to_string() }),
                     );
                     Box::new(crate::models::HashEmbeddingProvider::new())
                 }
             };
+        let generation_provider: Option<Box<dyn crate::models::ModelProvider>> =
+            match crate::models::select_generation_provider(&settings) {
+                Ok(provider) => provider,
+                Err(e) => {
+                    crate::utils::logging::log(
+                        crate::utils::logging::Level::Warn,
+                        "reasoning",
+                        "generation model unavailable; answering from evidence only",
+                        serde_json::json!({ "error": e.to_string() }),
+                    );
+                    None
+                }
+            };
         let limit = limit.unwrap_or(crate::reasoning::DEFAULT_CONTEXT_LIMIT);
-        crate::reasoning::answer(&self.index, provider.as_ref(), query, limit).map_err(db_err)
+        crate::reasoning::answer_with_generation(
+            &self.index,
+            embedding_provider.as_ref(),
+            generation_provider.as_deref(),
+            query,
+            limit,
+        )
+        .map_err(db_err)
     }
 
     // ---- Agent & safety API (§59–66) ----

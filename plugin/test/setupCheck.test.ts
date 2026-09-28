@@ -8,6 +8,13 @@ import {
   probeBinaryPath,
   summarizeModelStatus,
   offlineModelSummary,
+  ollamaBaseUrl,
+  pickEmbeddingModel,
+  pickGenerationModel,
+  buildOllamaShimSource,
+  shimState,
+  OLLAMA_SHIM_NAME,
+  type OllamaTag,
 } from "../src/onboarding/setupCheck";
 
 describe("core binary detection", () => {
@@ -95,5 +102,87 @@ describe("summarizeModelStatus", () => {
     const summary = offlineModelSummary();
     expect(summary.provider).toBe("unknown");
     expect(summary.message).toContain("not running");
+  });
+});
+
+describe("ollama detection helpers", () => {
+  it("defaults the base URL to the local Ollama port", () => {
+    expect(ollamaBaseUrl({})).toBe("http://127.0.0.1:11434");
+  });
+
+  it("honors OLLAMA_HOST in its three documented shapes", () => {
+    expect(ollamaBaseUrl({ OLLAMA_HOST: "0.0.0.0:11434" })).toBe("http://0.0.0.0:11434");
+    expect(ollamaBaseUrl({ OLLAMA_HOST: "localhost" })).toBe("http://localhost");
+    expect(ollamaBaseUrl({ OLLAMA_HOST: "http://192.168.1.10:11434/" })).toBe(
+      "http://192.168.1.10:11434",
+    );
+  });
+
+  const tag = (name: string, size_bytes = 1000): OllamaTag => ({ name, size_bytes });
+
+  it("prefers a dedicated embedding model, smallest first", () => {
+    const picked = pickEmbeddingModel([
+      tag("llama3.1:8b", 5_000_000_000),
+      tag("nomic-embed-text:v1.5", 270_000_000),
+      tag("mxbai-embed-large", 670_000_000),
+    ]);
+    expect(picked?.name).toBe("nomic-embed-text:v1.5");
+  });
+
+  it("never picks a chat model when anything else exists", () => {
+    const picked = pickEmbeddingModel([tag("llama3.1:8b"), tag("mistral")]);
+    expect(picked).toBeNull();
+  });
+
+  it("falls back to the smallest non-chat model when no embed model exists", () => {
+    const picked = pickEmbeddingModel([tag("qwen2.5-coder:7b", 4_000_000_000), tag("snowflake-arctic-embed:s", 130_000_000)]);
+    expect(picked?.name).toBe("snowflake-arctic-embed:s");
+  });
+
+  it("picks the chat model for generation when it is the only model installed", () => {
+    // The user's exact scenario: Ollama running with only qwen3:4b.
+    const picked = pickGenerationModel([tag("qwen3:4b", 2_600_000_000)]);
+    expect(picked?.name).toBe("qwen3:4b");
+  });
+
+  it("generation never double-books the embedding pick", () => {
+    const models = [tag("nomic-embed-text:v1.5", 270_000_000), tag("qwen3:4b", 2_600_000_000)];
+    expect(pickEmbeddingModel(models)?.name).toBe("nomic-embed-text:v1.5");
+    expect(pickGenerationModel(models)?.name).toBe("qwen3:4b");
+  });
+
+  it("generation prefers a chat family when several candidates exist", () => {
+    const picked = pickGenerationModel([
+      tag("some-random-7b", 4_000_000_000),
+      tag("llama3.1:8b", 5_000_000_000),
+    ]);
+    expect(picked?.name).toBe("llama3.1:8b");
+  });
+
+  it("generation returns null when only one model exists and the embedder takes it", () => {
+    const models = [tag("nomic-embed-text:v1.5", 270_000_000)];
+    expect(pickEmbeddingModel(models)?.name).toBe("nomic-embed-text:v1.5");
+    expect(pickGenerationModel(models)).toBeNull();
+  });
+
+  it("shim source speaks the core's exact CLI-provider contract", () => {
+    const src = buildOllamaShimSource("http://127.0.0.1:11434");
+    expect(src).toContain('/api/embed');
+    expect(src).toContain('/api/generate');
+    expect(src).toContain('"embeddings"');
+    expect(src).toContain('"text"');
+    expect(src).toContain('BASE_URL = "http://127.0.0.1:11434"');
+    // No cloud endpoints, ever.
+    expect(src).not.toContain("https://api.");
+  });
+
+  it("shimState reports installation honestly", () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "sv-shim-"));
+    expect(shimState(dir).installed).toBe(false);
+    fs.writeFileSync(path.join(dir, OLLAMA_SHIM_NAME), "#!/bin/sh\nexit 0\n", { mode: 0o755 });
+    const state = shimState(dir);
+    expect(state.installed).toBe(true);
+    expect(state.path).toBe(path.join(dir, OLLAMA_SHIM_NAME));
+    fs.rmSync(dir, { recursive: true, force: true });
   });
 });

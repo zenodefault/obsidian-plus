@@ -98,25 +98,95 @@ export async function stopCore(proc: CoreProcess, killTimeoutMs = 3000): Promise
   void killed;
 }
 
-/** Default search locations for the core binary, relative to the plugin dir. */
-export function defaultBinaryCandidates(pluginDir: string): string[] {
-  const sep = path.sep;
-  return [
-    path.join(pluginDir, "..", "..", "core", "target", "release", "sovereign-core"),
-    path.join(pluginDir, "..", "..", "core", "target", "debug", "sovereign-core"),
-    path.join(pluginDir, "bin", `sovereign-core${sep === "\\" ? ".exe" : ""}`),
-  ];
+/**
+ * Where the plugin may live, for dev and symlinked layouts.
+ *
+ * Obsidian reports `manifest.dir` as a *vault-relative* path, so the caller
+ * must make it absolute before searching: a relative path is resolved against
+ * Obsidian's own working directory, never matches, and the core silently never
+ * starts (the "Sovereign core is not running" failure mode).
+ */
+export interface BinarySearchRoots {
+  pluginDir: string;
+  /** Absolute vault root, when known (desktop FileSystemAdapter). */
+  vaultRoot?: string | null;
 }
 
-/** First existing candidate, or null. */
-export function resolveCoreBinary(pluginDir: string): string | null {
-  for (const candidate of defaultBinaryCandidates(pluginDir)) {
+/** Candidate paths, most likely first; deduplicated, order preserved. */
+export function defaultBinaryCandidates(roots: BinarySearchRoots): string[] {
+  const { pluginDir, vaultRoot } = roots;
+  const exe = process.platform === "win32" ? ".exe" : "";
+  const out: string[] = [];
+  const push = (candidate: string | null | undefined): void => {
+    if (candidate && candidate.length > 0 && !out.includes(candidate)) out.push(candidate);
+  };
+
+  const rootsToTry = [pluginDir];
+  try {
+    // A symlinked plugin folder (usual development setup: repo/plugin linked
+    // into <vault>/.obsidian/plugins/<id>) only reveals the repo layout
+    // through its real path.
+    const real = fs.realpathSync(pluginDir);
+    if (real !== pluginDir) rootsToTry.push(real);
+  } catch {
+    // Not resolvable; the literal path is enough.
+  }
+
+  for (const root of rootsToTry) {
+    // The installer drops the binary next to the bundle.
+    push(path.join(root, "bin", `sovereign-core${exe}`));
+    push(path.join(root, `sovereign-core${exe}`));
+    // Development: plugin folder inside the repo checkout.
+    for (const up of [path.join("..", ".."), path.join("..", "..", "..")]) {
+      push(path.join(root, up, "core", "target", "release", `sovereign-core${exe}`));
+      push(path.join(root, up, "core", "target", "debug", `sovereign-core${exe}`));
+    }
+  }
+
+  if (vaultRoot) {
+    // Vault living inside the repo checkout (…/repo/vault).
+    for (const up of ["..", path.join("..", ".."), path.join("..", "..", "..")]) {
+      push(path.join(vaultRoot, up, "core", "target", "release", `sovereign-core${exe}`));
+      push(path.join(vaultRoot, up, "core", "target", "debug", `sovereign-core${exe}`));
+    }
+    push(
+      path.join(
+        vaultRoot,
+        ".obsidian",
+        "plugins",
+        "sovereign-second-brain",
+        "bin",
+        `sovereign-core${exe}`,
+      ),
+    );
+  }
+
+  return out;
+}
+
+/** Resolution outcome including every path that was tried. */
+export interface BinaryResolution {
+  /** Absolute path to an executable core binary, or null when none was found. */
+  path: string | null;
+  /** Every candidate that was checked, in order (used for honest errors). */
+  searched: string[];
+}
+
+/** Resolve the core binary, reporting the search space on failure. */
+export function resolveCoreBinaryDetailed(roots: BinarySearchRoots): BinaryResolution {
+  const searched = defaultBinaryCandidates(roots);
+  for (const candidate of searched) {
     try {
       fs.accessSync(candidate, fs.constants.X_OK);
-      return candidate;
+      return { path: candidate, searched };
     } catch {
       // keep looking
     }
   }
-  return null;
+  return { path: null, searched };
+}
+
+/** First existing candidate, or null. */
+export function resolveCoreBinary(roots: BinarySearchRoots): string | null {
+  return resolveCoreBinaryDetailed(roots).path;
 }

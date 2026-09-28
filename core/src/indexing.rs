@@ -210,6 +210,16 @@ impl NoteIndex {
         if safe.is_empty() {
             return Ok(Vec::new());
         }
+        // Heading paths and note paths are metadata, not part of the FTS
+        // content column. Include the final meaningful query term so a query
+        // such as "what did I decide about the database" can find a
+        // `# Database` section even when its body uses only "storage layer".
+        let metadata_probe = query
+            .split_whitespace()
+            .rev()
+            .map(|t| t.trim_matches(|c: char| c.is_ascii_punctuation()))
+            .find(|t| !t.is_empty())
+            .unwrap_or("");
         let mut stmt = self.conn.prepare(
             "SELECT n.id, n.path, c.id, c.heading_path,
                     snippet(chunks_fts, 0, '«', '»', '…', 12),
@@ -231,7 +241,34 @@ impl NoteIndex {
                 rank: row.get(5)?,
             })
         })?;
-        rows.collect()
+        let hits = rows.collect::<Result<Vec<_>, _>>()?;
+        if !hits.is_empty() || metadata_probe.is_empty() {
+            return Ok(hits);
+        }
+
+        // FTS cannot be combined with an `OR` metadata clause. Run this
+        // bounded fallback only when content search had no hit.
+        let mut stmt = self.conn.prepare(
+            "SELECT n.id, n.path, c.id, c.heading_path, c.text, 0.0
+             FROM chunks c JOIN notes n ON n.id = c.note_id
+             WHERE n.status = 'active'
+               AND (lower(c.heading_path) LIKE '%' || lower(?1) || '%'
+                    OR lower(n.path) LIKE '%' || lower(?1) || '%')
+             ORDER BY n.path, c.ordinal
+             LIMIT ?2",
+        )?;
+        let fallback = stmt.query_map(params![metadata_probe, limit as i64], |row| {
+            Ok(SearchHit {
+                note_id: row.get(0)?,
+                note_path: row.get(1)?,
+                chunk_id: row.get(2)?,
+                heading_path: row.get(3)?,
+                snippet: row.get(4)?,
+                rank: row.get(5)?,
+            })
+        })?
+        .collect::<Result<Vec<_>, _>>();
+        fallback
     }
 
     /// Look up a note id by path (sync bridges).
@@ -249,8 +286,20 @@ impl NoteIndex {
 /// FTS5 query escaping: wrap each term in double quotes so user input is
 /// treated as literal text, never as query syntax (§67 adjacent hygiene).
 fn fts_escape(query: &str) -> String {
+    // Natural-language questions contain glue words ("what did I decide
+    // about …") which must not turn an otherwise precise search into zero
+    // results. Keep meaningful terms ANDed together; this is still much
+    // stricter than an OR search and avoids unrelated evidence.
+    const STOP_WORDS: &[&str] = &[
+        "a", "an", "and", "are", "about", "decide", "decided", "decision", "did", "do", "does",
+        "everything", "find", "for", "from", "how", "i", "in", "is", "it", "know", "my", "of",
+        "on", "related", "summarize", "summarise", "the", "to", "was", "we", "what", "where", "which",
+        "who", "why", "with", "you", "your",
+    ];
     let terms: Vec<String> = query
         .split_whitespace()
+        .map(|t| t.trim_matches(|c: char| c.is_ascii_punctuation()))
+        .filter(|t| !t.is_empty() && !STOP_WORDS.contains(&t.to_ascii_lowercase().as_str()))
         .map(|t| format!("\"{}\"", t.replace('"', "\"\"")))
         .collect();
     terms.join(" ")

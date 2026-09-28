@@ -62,6 +62,7 @@ Rules:
 | `search.query` | `{ query, limit?: usize ≤ 100 }` | `{ hits: [{note_id, note_path, chunk_id, heading_path, snippet, score}], total_notes }` |
 | `health.summary` | `{}` | `{ total_notes, total_chunks, total_entities, total_claims, broken_links[], orphan_notes[], duplicate_candidates[], failed_jobs, pending_jobs }` |
 | `models.status` | `{}` | `{ provider, model_path?, binary_path?, dimension, chunks_total, chunks_embedded, chunks_pending, validation_error? }` |
+| `models.configure` | `{ provider: hash\|cli\|ollama, model_path?, binary_path?, base_url? }` | `{ applied: true, validation_error? }` — persists the model configuration (core settings table); validation is an existence check only |
 | `memory.list` | `{ status?: string }` | `{ memories: MemoryEntry[] }` |
 | `memory.accept` / `memory.reject` | `{ id }` | `{ memory: MemoryEntry }` |
 | `memory.update` | `{ id, content?, type? }` | `{ memory: MemoryEntry }` |

@@ -13,8 +13,8 @@ use crate::protocol::{
     AgentToolsResult, AgentVerifyResult, AskParams, AuditListParams, AuditListResult,
     ContradictionListResult, ContradictionResolveParams, ContradictionResolveResult,
     HealthDuplicateDto, HealthFindingDto, HealthSummaryResult, MemoryIdParams,
-    OperationExecuteParams, OperationIdParams, OperationListParams, OperationListResult,
-    OperationVerifyParams,
+    ModelsConfigureParams, OperationExecuteParams, OperationIdParams, OperationListParams,
+    OperationListResult, OperationVerifyParams,
 };
 use crate::agent::AgentApiError;
 use crate::memory::MemoryApiError;
@@ -72,6 +72,7 @@ pub fn dispatch(env: &Envelope, state: &Arc<DispatchState>, vault: &Arc<SyncMana
         "search.query" => handle_search_query(env, vault),
         "health.summary" => handle_health_summary(env, vault),
         "models.status" => handle_models_status(env, vault),
+        "models.configure" => handle_models_configure(env, vault),
         "memory.list" => handle_memory_list(env, vault),
         "memory.accept" => handle_memory_accept(env, vault),
         "memory.reject" => handle_memory_reject(env, vault),
@@ -279,6 +280,25 @@ fn handle_models_status(env: &Envelope, vault: &Arc<SyncManager>) -> Outcome {
     match vault.models_status() {
         Ok(status) => ok(&id, serde_json::to_value(status).unwrap_or(Value::Null)),
         Err(err) => Outcome::Reply(Envelope::failure(id.clone(), err.with_request_id(id))),
+    }
+}
+
+fn handle_models_configure(env: &Envelope, vault: &Arc<SyncManager>) -> Outcome {
+    let Some(id) = env.id.clone() else { return Outcome::NoReply };
+    let parsed = serde_json::from_value::<ModelsConfigureParams>(
+        env.params.clone().unwrap_or(Value::Null),
+    );
+    match parsed {
+        Ok(params) => match vault.models_configure(&params) {
+            Ok(result) => ok(&id, serde_json::to_value(result).unwrap_or(Value::Null)),
+            Err(err) => Outcome::Reply(Envelope::failure(id.clone(), err.with_request_id(id))),
+        },
+        Err(e) => Outcome::Reply(
+            Envelope::failure(
+                id.clone(),
+                RpcError::new(ErrorCode::InvalidParams, e.to_string()).with_request_id(&id),
+            ),
+        ),
     }
 }
 

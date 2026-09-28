@@ -1,0 +1,11 @@
+{
+  "coreBinaryPath": "",
+  "dataDir": "",
+  "requestTimeoutMs": 15000,
+  "onboardingComplete": true,
+  "ollamaAutoLink": true,
+  "ollamaBaseUrl": "",
+  "beamSize": "sm",
+  "beamColor": "theme",
+  "beamStrength": 0.5
+}

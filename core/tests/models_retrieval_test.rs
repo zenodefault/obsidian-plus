@@ -164,9 +164,9 @@ fn hybrid_search_merges_signals_with_breakdown() {
     assert!(breakdown.semantic > 0.0, "semantic signal fired");
     assert!(hits[0].score > 0.0 && hits[0].score <= 1.0);
 
-    // Unrelated query returns something sane, not a panic.
-    let none = search(&idx, &provider, "quantum chromodynamics", 10).unwrap();
-    let _ = none;
+    // A missing query must not be filled with random hash-vector collisions.
+    let none = search(&idx, &provider, "iphone 7", 10).unwrap();
+    assert!(none.is_empty(), "unrelated notes must not masquerade as evidence");
 }
 
 #[test]

@@ -1,0 +1,9 @@
+{
+  "id": "sovereign-second-brain",
+  "name": "Sovereign Second Brain",
+  "version": "0.1.0",
+  "minAppVersion": "1.5.0",
+  "description": "Local, offline-capable intelligence layer for your vault. Zero cloud, zero telemetry, zero accounts.",
+  "author": "Sovereign Second Brain contributors",
+  "isDesktopOnly": true
+}

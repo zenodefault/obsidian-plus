@@ -274,7 +274,7 @@ fn vault_sync_round_trip_over_stdio() {
     let reply = core2.request(&Envelope::request(
         "t13",
         "search.query",
-        json!({"query": "hello world", "limit": 5}),
+        json!({"query": "duplicated body", "limit": 5}),
     ));
     let hits = reply.result.expect("search result")["hits"].as_array().unwrap().clone();
     assert!(!hits.is_empty());

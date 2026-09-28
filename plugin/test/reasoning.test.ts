@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { ask } from "../src/vault/reasoning";
+import { ask, ASK_REQUEST_TIMEOUT_MS } from "../src/vault/reasoning";
 import type { AskResult } from "../src/vault/types";
 
 const sample: AskResult = {
@@ -25,7 +25,11 @@ describe("reasoning wrapper", () => {
   it("sends brain.ask with trimmed query and bounded limit", async () => {
     const request = vi.fn().mockResolvedValue(sample);
     const result = await ask({ request }, "  what did I decide?  ", 4);
-    expect(request).toHaveBeenCalledWith("brain.ask", { query: "what did I decide?", limit: 4 });
+    expect(request).toHaveBeenCalledWith(
+      "brain.ask",
+      { query: "what did I decide?", limit: 4 },
+      ASK_REQUEST_TIMEOUT_MS,
+    );
     expect(result.answer).toContain("Postgres");
     expect(result.sources[0]!.note_path).toBe("Projects/Decision.md");
   });
@@ -33,11 +37,11 @@ describe("reasoning wrapper", () => {
   it("clamps limit into 1..=20 and defaults to 6", async () => {
     const request = vi.fn().mockResolvedValue(sample);
     await ask({ request }, "q", 999);
-    expect(request).toHaveBeenLastCalledWith("brain.ask", { query: "q", limit: 20 });
+    expect(request).toHaveBeenLastCalledWith("brain.ask", { query: "q", limit: 20 }, ASK_REQUEST_TIMEOUT_MS);
     await ask({ request }, "q", 0);
-    expect(request).toHaveBeenLastCalledWith("brain.ask", { query: "q", limit: 1 });
+    expect(request).toHaveBeenLastCalledWith("brain.ask", { query: "q", limit: 1 }, ASK_REQUEST_TIMEOUT_MS);
     await ask({ request }, "q");
-    expect(request).toHaveBeenLastCalledWith("brain.ask", { query: "q", limit: 6 });
+    expect(request).toHaveBeenLastCalledWith("brain.ask", { query: "q", limit: 6 }, ASK_REQUEST_TIMEOUT_MS);
   });
 
   it("refuses empty queries locally", async () => {

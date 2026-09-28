@@ -1,0 +1,1205 @@
+/* ==========================================================================
+   Sovereign Second Brain — Obsidian Plugin Styles
+   Zero-cloud, native Obsidian CSS variables styling.
+   Layout: base → overlay popup (BorderBeam) → ask surface → graph → wizard.
+   ========================================================================== */
+
+/* --------------------------------------------------------------------------
+   Generic cards & utilities (settings tab, modal shells)
+   -------------------------------------------------------------------------- */
+
+.sovereign-card {
+  background: var(--background-secondary);
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 8px;
+  padding: 12px;
+  margin-bottom: 12px;
+}
+
+.sovereign-card-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 8px;
+}
+
+.sovereign-card-title {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-normal);
+}
+
+.sovereign-badge {
+  font-size: 9px;
+  font-weight: 700;
+  padding: 2px 6px;
+  border-radius: 4px;
+  text-transform: uppercase;
+}
+
+.sovereign-badge-ok { background: rgba(16, 185, 129, 0.15); color: #10b981; }
+.sovereign-badge-goal { background: rgba(59, 130, 246, 0.15); color: #3b82f6; }
+.sovereign-badge-preference { background: rgba(168, 85, 247, 0.15); color: #a855f7; }
+.sovereign-badge-decision { background: rgba(16, 185, 129, 0.15); color: #10b981; }
+.sovereign-badge-experience { background: rgba(245, 158, 11, 0.15); color: #f59e0b; }
+.sovereign-badge-project { background: rgba(99, 102, 241, 0.15); color: #6366f1; }
+
+.sovereign-badge-risk-low { background: rgba(16, 185, 129, 0.15); color: #10b981; }
+.sovereign-badge-risk-medium { background: rgba(245, 158, 11, 0.15); color: #f59e0b; }
+.sovereign-badge-risk-high { background: rgba(239, 68, 68, 0.15); color: #ef4444; }
+
+.sovereign-text-success { color: #10b981; }
+.sovereign-text-warning { color: #f59e0b; }
+.sovereign-text-xs { font-size: 10px; }
+.sovereign-text-sm { font-size: 11px; }
+.sovereign-text-muted { color: var(--text-muted); }
+.sovereign-text-bold { font-weight: 600; }
+
+.sovereign-privacy-card { border-left: 3px solid #10b981; }
+
+.sovereign-privacy-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 8px 0;
+}
+
+.sovereign-privacy-row {
+  display: flex;
+  justify-content: space-between;
+  font-size: 11px;
+}
+
+.sovereign-privacy-key { color: var(--text-muted); }
+
+.sovereign-privacy-val { font-weight: 600; }
+
+.sovereign-privacy-footnote {
+  border-top: 1px solid var(--background-modifier-border);
+  padding-top: 6px;
+  margin-top: 8px;
+}
+
+.sovereign-btn-sm {
+  font-size: 10px;
+  padding: 2px 8px;
+  border-radius: 4px;
+  cursor: pointer;
+}
+
+.sovereign-btn-secondary {
+  background: var(--background-primary);
+  border: 1px solid var(--background-modifier-border);
+  color: var(--text-normal);
+}
+
+.sovereign-btn-secondary:hover {
+  background: var(--background-modifier-hover);
+}
+
+.sovereign-btn-primary {
+  font-size: 11px;
+  padding: 4px 12px;
+  border-radius: 6px;
+}
+
+.sovereign-btn-group {
+  display: flex;
+  gap: 6px;
+}
+
+/* ==========================================================================
+   Overlay popup (Workstream: overlay redesign)
+   One animated element: a BorderBeam of light riding the perimeter.
+   Quiet when idle, slightly more alive while thinking, settled after the
+   answer. Everything else is calm typography on a single surface.
+   ========================================================================== */
+
+.sovereign-overlay-modal .modal-content,
+.sovereign-wizard-modal .modal-content {
+  padding: 0;
+  background: transparent;
+  border: none;
+  box-shadow: none;
+}
+
+/* The frame is sized BY the overlay; the modal shell must not clip it.
+   Obsidian's default modal is width-capped (max-width ~700-900px depending
+   on theme) and vertically centered with its own scroll — that is what
+   produced the cut-off right edge and the stray scrollbar under the
+   popup. Neutralize both. */
+.sovereign-overlay-modal.modal,
+.sovereign-wizard-modal.modal {
+  width: auto;
+  max-width: none;
+  height: auto;
+  max-height: none;
+  overflow: visible;
+}
+
+.sovereign-overlay-modal .modal-content,
+.sovereign-wizard-modal .modal-content {
+  width: auto;
+  max-width: none;
+  height: auto;
+  max-height: none;
+  overflow: visible;
+}
+
+.sovereign-overlay-modal .modal-close-button {
+  display: none; /* the frame carries its own close affordance */
+}
+
+.sovereign-overlay-frame {
+  --sovereign-frame-accent: var(--interactive-accent, #7c6cff);
+  --sovereign-frame-accent-soft: var(--interactive-accent-hover, #9a8cff);
+  --sovereign-beam-length: 26%; /* arc of the beam, as a fraction of the path */
+  --sovereign-beam-width: 1.5px;
+  --sovereign-beam-delay: 4.2s;
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  /* 620px ≈ a focused command surface: wide enough for a readable answer,
+     narrow enough to read as an overlay rather than a dashboard. */
+  width: min(620px, 92vw);
+  height: min(600px, 84vh);
+  margin: 0 auto;
+  padding: 2px; /* hairline room for the beam */
+  border-radius: 16px;
+  background: var(--background-primary);
+  border: 1px solid var(--background-modifier-border);
+  box-shadow:
+    0 24px 70px rgba(0, 0, 0, 0.35),
+    0 4px 18px rgba(0, 0, 0, 0.22);
+  overflow: hidden;
+  box-sizing: border-box;
+  /* Entrance: fade + slight rise. Reverse plays on close (CSS only). */
+  animation: sovereign-overlay-in 200ms ease-out;
+}
+
+@keyframes sovereign-overlay-in {
+  from {
+    opacity: 0;
+    transform: translateY(8px) scale(0.985);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+/*
+ * BorderBeam (pure CSS recreation of the border-beam effect):
+ * a conic gradient carries a short luminous arc that travels the perimeter.
+ * The gradient sits on the beam layer; a two-layer mask keeps only a thin
+ * ring visible so the beam hugs the border radius and never covers content.
+ * Colors follow the active Obsidian accent — never forced blue.
+ */
+.sovereign-beam-layer {
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  pointer-events: none;
+  overflow: hidden;
+  /* The travelling gradient. Length/width come from the frame variables so
+     the wizard can share the same beam with different proportions. */
+  background: conic-gradient(
+    from var(--sovereign-beam-angle, 0deg),
+    transparent 0deg,
+    transparent calc(100% - var(--sovereign-beam-length) - 6%),
+    var(--sovereign-frame-accent-soft) calc(100% - var(--sovereign-beam-length)),
+    var(--sovereign-frame-accent) 100%,
+    transparent 100%
+  );
+  -webkit-mask:
+    linear-gradient(#fff 0 0) content-box,
+    linear-gradient(#fff 0 0);
+  -webkit-mask-composite: xor;
+  mask:
+    linear-gradient(#fff 0 0) content-box,
+    linear-gradient(#fff 0 0);
+  mask-composite: exclude;
+  padding: var(--sovereign-beam-width);
+  animation: sovereign-beam-run 5.5s linear infinite;
+  opacity: 0.45;
+  transition: opacity 400ms ease;
+}
+
+/* Soft halo trailing the beam head: same layer, blurred ring beneath. */
+.sovereign-beam-layer::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  padding: 4px;
+  background: inherit;
+  -webkit-mask:
+    linear-gradient(#fff 0 0) content-box,
+    linear-gradient(#fff 0 0);
+  -webkit-mask-composite: xor;
+  mask:
+    linear-gradient(#fff 0 0) content-box,
+    linear-gradient(#fff 0 0);
+  mask-composite: exclude;
+  filter: blur(3px);
+  opacity: 0.5;
+}
+
+@property --sovereign-beam-angle {
+  syntax: "<angle>";
+  initial-value: 0deg;
+  inherits: false;
+}
+
+@keyframes sovereign-beam-run {
+  to {
+    --sovereign-beam-angle: 360deg;
+  }
+}
+
+/* Lifecycle states driven by the ask flow (frame classes set by the modal). */
+
+/* Thinking: beam brightens and speeds up; a faint backlight appears. */
+.sovereign-overlay-frame.is-thinking {
+  --sovereign-beam-delay: 0s;
+}
+
+.sovereign-overlay-frame.is-thinking .sovereign-beam-layer {
+  animation-duration: 2.2s;
+  opacity: 0.95;
+}
+
+.sovereign-overlay-frame.is-thinking::before {
+  content: "";
+  position: absolute;
+  inset: -1px;
+  border-radius: inherit;
+  pointer-events: none;
+  box-shadow: 0 0 26px -8px var(--sovereign-frame-accent);
+  animation: sovereign-beam-breathe 2.4s ease-in-out infinite;
+  opacity: 0.5;
+}
+
+@keyframes sovereign-beam-breathe {
+  0%, 100% { opacity: 0.3; }
+  50% { opacity: 0.6; }
+}
+
+/* Answered: settle back to the idle whisper. */
+.sovereign-overlay-frame.is-answered .sovereign-beam-layer {
+  opacity: 0.3;
+}
+
+/* Error: restrained — the beam holds still and desaturates; no red glow. */
+.sovereign-overlay-frame.is-error .sovereign-beam-layer {
+  animation-play-state: paused;
+  opacity: 0.35;
+  filter: saturate(0.4);
+}
+
+/* Reduced motion: static hairline in the accent, no travelling light. */
+@media (prefers-reduced-motion: reduce) {
+  .sovereign-beam-layer,
+  .sovereign-beam-layer::after {
+    animation: none;
+    background: var(--sovereign-frame-accent);
+    opacity: 0.35;
+  }
+  .sovereign-overlay-frame.is-thinking .sovereign-beam-layer,
+  .sovereign-overlay-frame.is-thinking .sovereign-beam-layer::after {
+    animation: none;
+    opacity: 0.55;
+  }
+  .sovereign-overlay-frame.is-thinking::before {
+    animation: none;
+    opacity: 0.25;
+  }
+  .sovereign-overlay-frame {
+    animation: none;
+  }
+}
+
+.sovereign-overlay-body {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 auto;
+  min-height: 0;
+  border-radius: 14px;
+  overflow: hidden;
+  background: var(--background-primary);
+}
+
+.sovereign-overlay-close {
+  position: absolute;
+  top: 12px;
+  right: 14px;
+  z-index: 3;
+  width: 24px;
+  height: 24px;
+  display: grid;
+  place-items: center;
+  font-size: 13px;
+  color: var(--text-faint);
+  border-radius: 6px;
+  cursor: pointer;
+  user-select: none;
+}
+
+.sovereign-overlay-close:hover {
+  color: var(--text-normal);
+  background: var(--background-modifier-hover);
+}
+
+/* --------------------------------------------------------------------------
+   Brain ask surface (the entire popup content)
+   -------------------------------------------------------------------------- */
+
+.sovereign-brain-surface {
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 auto;
+  min-height: 0;
+  padding: 26px 26px 18px 26px;
+  overflow: hidden;
+}
+
+/* Hero: the quiet identity line. Yields once a question is in flight. */
+.sovereign-brain-hero {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+  padding: 26px 0 18px 0;
+  transition: opacity 260ms ease, transform 260ms ease;
+}
+
+.sovereign-brain-hero.is-hidden {
+  display: none;
+}
+
+.sovereign-brain-hero-mark {
+  font-size: 22px;
+  line-height: 1;
+  color: var(--sovereign-frame-accent, var(--interactive-accent));
+  opacity: 0.9;
+}
+
+.sovereign-brain-hero-text {
+  font-size: 15px;
+  font-weight: 500;
+  letter-spacing: 0.01em;
+  color: var(--text-muted);
+}
+
+/* Quiet system-state line ("Searching your knowledge locally…"). */
+.sovereign-brain-status {
+  min-height: 0;
+  font-size: 11px;
+  color: var(--text-muted);
+  letter-spacing: 0.02em;
+  text-align: center;
+  padding-bottom: 8px;
+  opacity: 0;
+  transition: opacity 200ms ease;
+}
+
+.sovereign-brain-status.is-visible {
+  opacity: 0.9;
+}
+
+/* --------------------------------------------------------------------------
+   Ask flow (question → thinking → answer → sources)
+   -------------------------------------------------------------------------- */
+
+.sovereign-ask-view {
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
+/* The input box: the primary object of the surface. */
+.sovereign-ask-input-box {
+  background: var(--background-primary);
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 10px;
+  padding: 10px 12px 8px 12px;
+  margin-bottom: 14px;
+  transition: border-color 180ms ease, box-shadow 180ms ease;
+  flex-shrink: 0;
+}
+
+.sovereign-ask-input-box:focus-within {
+  border-color: var(--sovereign-frame-accent, var(--interactive-accent));
+  box-shadow: 0 0 0 1px -moz-mac-focusring, 0 0 0 1px color-mix(in srgb, var(--sovereign-frame-accent, var(--interactive-accent)) 25%, transparent);
+}
+
+.sovereign-textarea {
+  width: 100%;
+  resize: none;
+  background: transparent;
+  border: none;
+  outline: none;
+  padding: 2px 0;
+  font-size: 14px;
+  line-height: 1.5;
+  color: var(--text-normal);
+  font-family: var(--font-interface);
+}
+
+.sovereign-textarea::placeholder {
+  color: var(--text-faint);
+}
+
+.sovereign-ask-actions {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
+}
+
+.sovereign-ask-hint {
+  font-size: 10px;
+  color: var(--text-faint);
+  letter-spacing: 0.02em;
+}
+
+.sovereign-ask-submit {
+  font-size: 11px;
+  padding: 3px 12px;
+  border-radius: 6px;
+  box-shadow: none;
+}
+
+.sovereign-ask-submit:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.sovereign-ask-results {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  padding-right: 2px;
+}
+
+/* One clean flow per query: question echo → answer → sources. */
+.sovereign-ask-flow {
+  animation: sovereign-answer-in 240ms ease-out;
+}
+
+@keyframes sovereign-answer-in {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+/* The question, echoed as the header of the flow. */
+.sovereign-ask-question {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text-normal);
+  padding: 2px 0 10px 0;
+  border-bottom: 1px solid var(--background-modifier-border);
+  margin-bottom: 12px;
+}
+
+/* Thinking state: quiet text pulse, never a spinner. */
+.sovereign-ask-thinking {
+  display: flex;
+  align-items: baseline;
+  gap: 2px;
+  padding: 6px 0;
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+.sovereign-ask-thinking-text {
+  letter-spacing: 0.02em;
+}
+
+.sovereign-ask-thinking-dots::after {
+  content: "…";
+  display: inline-block;
+  animation: sovereign-dots 1.4s steps(4, end) infinite;
+  width: 1.2em;
+  text-align: left;
+}
+
+@keyframes sovereign-dots {
+  0% { content: ""; }
+  25% { content: "."; }
+  50% { content: ".."; }
+  75% { content: "…"; }
+  100% { content: ""; }
+}
+
+/* Error: concise, restrained. Details go to the console, not the UI. */
+.sovereign-ask-error {
+  border: 1px solid var(--background-modifier-border);
+  border-left: 3px solid #d97706;
+  border-radius: 8px;
+  padding: 10px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  font-size: 12px;
+}
+
+.sovereign-ask-error-sub {
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
+/* Answer card: quiet surface, readable typography. */
+.sovereign-answer-card {
+  background: transparent;
+  border: none;
+  padding: 0;
+}
+
+.sovereign-answer-body {
+  font-size: 13.5px;
+  line-height: 1.65;
+  color: var(--text-normal);
+}
+
+.sovereign-answer-body p {
+  margin: 0 0 10px 0;
+}
+
+/* Small confidence line under the answer. */
+.sovereign-conf-line {
+  font-size: 10.5px;
+  letter-spacing: 0.02em;
+  margin: 2px 0 10px 0;
+}
+
+.sovereign-conf-high { color: #10b981; }
+.sovereign-conf-medium { color: #f59e0b; }
+.sovereign-conf-low { color: #ef4444; }
+
+/* Contradictions: only when the core found some. */
+.sovereign-alert-box {
+  border-radius: 8px;
+  padding: 10px 12px;
+  margin: 4px 0 12px 0;
+  border: 1px solid rgba(245, 158, 11, 0.35);
+  background: rgba(245, 158, 11, 0.07);
+}
+
+.sovereign-alert-title {
+  font-size: 11px;
+  font-weight: 700;
+  color: #d97706;
+  margin-bottom: 6px;
+  display: block;
+}
+
+.sovereign-alert-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+  margin-bottom: 6px;
+}
+
+.sovereign-alert-col blockquote {
+  margin: 2px 0;
+  padding-left: 6px;
+  border-left: 2px solid #d97706;
+  font-size: 11px;
+  font-style: italic;
+}
+
+.sovereign-source-path {
+  display: block;
+  font-size: 10px;
+  color: var(--text-faint);
+}
+
+.sovereign-alert-interp {
+  font-size: 11px;
+  color: var(--text-normal);
+  border-top: 1px dashed rgba(245, 158, 11, 0.3);
+  padding-top: 4px;
+}
+
+/* Sources: collapsible rows; the title opens the real note. */
+.sovereign-section-subhead {
+  font-size: 10px;
+  font-weight: 700;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  margin: 12px 0 6px 0;
+}
+
+.sovereign-sources-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.sovereign-source-item {
+  background: var(--background-secondary);
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 8px;
+  overflow: hidden;
+}
+
+.sovereign-source-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 10px;
+  cursor: pointer;
+  user-select: none;
+}
+
+.sovereign-source-link {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-accent);
+  cursor: pointer;
+  text-decoration: none;
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.sovereign-source-link:hover {
+  text-decoration: underline;
+}
+
+.sovereign-source-score {
+  margin-left: auto;
+  font-size: 10px;
+  color: var(--text-faint);
+  font-variant-numeric: tabular-nums;
+}
+
+.sovereign-source-caret {
+  font-size: 9px;
+  color: var(--text-faint);
+  transition: transform 180ms ease;
+}
+
+.sovereign-source-item.is-open .sovereign-source-caret {
+  transform: rotate(90deg);
+}
+
+.sovereign-source-excerpt {
+  display: grid;
+  grid-template-rows: 0fr;
+  transition: grid-template-rows 200ms ease;
+}
+
+.sovereign-source-excerpt > p {
+  overflow: hidden;
+  margin: 0 10px;
+  font-size: 11px;
+  line-height: 1.5;
+  color: var(--text-muted);
+  opacity: 0;
+  transition: opacity 200ms ease, padding 200ms ease;
+}
+
+.sovereign-source-item.is-open .sovereign-source-excerpt {
+  grid-template-rows: 1fr;
+}
+
+.sovereign-source-item.is-open .sovereign-source-excerpt > p {
+  opacity: 1;
+  padding: 0 0 9px 0;
+}
+
+/* Related memory: only when the core actually returned some. */
+.sovereign-memory-chip {
+  background: var(--background-secondary);
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 8px;
+  padding: 7px 10px;
+  font-size: 11.5px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 4px;
+}
+
+.sovereign-memory-statement {
+  color: var(--text-normal);
+  line-height: 1.45;
+}
+
+/* ==========================================================================
+   Knowledge graph (Workstream: graph redesign)
+   Header (brand + search) → canvas → details panel → empty state.
+   ========================================================================== */
+
+.sovereign-graph-root {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  padding: 0;
+  background-color: var(--background-primary);
+  color: var(--text-normal);
+  font-family: var(--font-interface);
+  overflow: hidden;
+}
+
+.sovereign-graph-header {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--background-modifier-border);
+  background: var(--background-secondary);
+}
+
+.sovereign-graph-brand {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.sovereign-graph-title {
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--text-normal);
+}
+
+.sovereign-graph-stats {
+  font-size: 10px;
+  font-weight: 500;
+  letter-spacing: 0.03em;
+  color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.sovereign-graph-controls {
+  display: flex;
+  gap: 6px;
+}
+
+.sovereign-graph-search {
+  flex: 1 1 auto;
+  min-width: 0;
+  background: var(--background-primary);
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 6px;
+  padding: 4px 9px;
+  font-size: 12px;
+  color: var(--text-normal);
+}
+
+.sovereign-graph-search:focus {
+  border-color: var(--interactive-accent);
+  outline: none;
+}
+
+.sovereign-graph-icon-btn {
+  flex: 0 0 auto;
+  width: 26px;
+  border-radius: 6px;
+  font-size: 13px;
+  color: var(--text-muted);
+  background: var(--background-primary);
+  border: 1px solid var(--background-modifier-border);
+  cursor: pointer;
+}
+
+.sovereign-graph-icon-btn:hover {
+  color: var(--text-normal);
+  background: var(--background-modifier-hover);
+}
+
+.sovereign-graph-body {
+  position: relative;
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
+.sovereign-graph-canvas {
+  display: block;
+  width: 100%;
+  height: 100%;
+  cursor: grab;
+  touch-action: none;
+}
+
+.sovereign-graph-canvas:active {
+  cursor: grabbing;
+}
+
+/* Details panel: compact contextual surface for the selected node. */
+.sovereign-graph-details {
+  border-top: 1px solid var(--background-modifier-border);
+  background: var(--background-secondary);
+  padding: 10px 12px 12px 12px;
+  flex-shrink: 0;
+  max-height: 40%;
+  overflow-y: auto;
+}
+
+.sovereign-graph-details-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.sovereign-graph-details-title {
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--text-normal);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.sovereign-graph-details-close {
+  font-size: 11px;
+  color: var(--text-faint);
+  cursor: pointer;
+  padding: 2px 4px;
+  border-radius: 4px;
+}
+
+.sovereign-graph-details-close:hover,
+.sovereign-graph-details-close:focus-visible {
+  color: var(--text-normal);
+  background: var(--background-modifier-hover);
+}
+
+.sovereign-graph-details-meta {
+  display: flex;
+  gap: 8px;
+  align-items: baseline;
+  margin-top: 3px;
+}
+
+.sovereign-graph-details-kind {
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  color: var(--text-accent);
+}
+
+.sovereign-graph-details-count {
+  font-size: 10.5px;
+  color: var(--text-muted);
+}
+
+.sovereign-graph-details-sub {
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  color: var(--text-muted);
+  margin: 8px 0 4px 0;
+}
+
+.sovereign-graph-details-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.sovereign-graph-details-rel {
+  font-size: 10.5px;
+  color: var(--text-muted);
+  background: var(--background-primary);
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 10px;
+  padding: 2px 8px;
+  cursor: pointer;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.sovereign-graph-details-rel:hover {
+  color: var(--text-normal);
+  border-color: var(--text-accent);
+}
+
+.sovereign-graph-details-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 10px;
+}
+
+.sovereign-graph-details-btn {
+  font-size: 10.5px;
+  padding: 3px 9px;
+  border-radius: 6px;
+  background: var(--background-primary);
+  border: 1px solid var(--background-modifier-border);
+  color: var(--text-normal);
+  cursor: pointer;
+}
+
+.sovereign-graph-details-btn:hover {
+  background: var(--background-modifier-hover);
+}
+
+.sovereign-graph-details-ask {
+  background: var(--interactive-accent);
+  border-color: var(--interactive-accent);
+  color: var(--text-on-accent);
+}
+
+.sovereign-graph-details-ask:hover {
+  background: var(--interactive-accent-hover);
+}
+
+/* Empty state: honest, no fake nodes. */
+.sovereign-graph-empty {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  text-align: center;
+  padding: 24px;
+}
+
+.sovereign-graph-empty-title {
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  color: var(--text-muted);
+}
+
+.sovereign-graph-empty-sub {
+  font-size: 12px;
+  line-height: 1.55;
+  color: var(--text-faint);
+  max-width: 320px;
+}
+
+.sovereign-graph-empty-btn {
+  margin-top: 6px;
+  font-size: 11px;
+  padding: 5px 14px;
+  border-radius: 6px;
+  background: var(--interactive-accent);
+  border: none;
+  color: var(--text-on-accent);
+  cursor: pointer;
+}
+
+/* ==========================================================================
+   Setup wizard (Workstream: setup)
+   Shares the overlay frame + BorderBeam.
+   ========================================================================== */
+
+.sovereign-wizard-modal .sovereign-overlay-frame {
+  width: min(560px, 92vw);
+  height: auto;
+  min-height: 380px;
+  max-height: 84vh;
+  padding: 2px;
+  --sovereign-beam-length: 18%;
+  --sovereign-beam-width: 1.25px;
+}
+
+.sovereign-wizard-header {
+  padding: 14px 18px 0 18px;
+  flex-shrink: 0;
+}
+
+.sovereign-wizard-steps {
+  display: flex;
+  gap: 6px;
+}
+
+.sovereign-wizard-step {
+  width: 18px;
+  height: 4px;
+  border-radius: 2px;
+  background: var(--background-modifier-border);
+  transition: background 0.2s ease;
+  /* Progress chips are purely graphical (aria-label carries the name);
+     the step digit must never leak outside a 4px-tall bar. */
+  font-size: 0;
+  line-height: 0;
+  overflow: hidden;
+}
+
+.sovereign-wizard-step.is-current {
+  background: var(--interactive-accent);
+}
+
+.sovereign-wizard-step.is-done {
+  background: var(--interactive-accent-hover, var(--interactive-accent));
+  opacity: 0.55;
+}
+
+.sovereign-wizard-body {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 12px 18px;
+}
+
+.sovereign-wizard-title {
+  margin: 6px 0 4px 0;
+  font-size: 16px;
+  font-weight: 700;
+  letter-spacing: 0.01em;
+}
+
+.sovereign-wizard-subtitle {
+  margin: 0 0 12px 0;
+  font-size: 12px;
+  line-height: 1.55;
+  color: var(--text-muted);
+}
+
+.sovereign-wizard-footnote {
+  margin: 14px 0 0 0;
+  padding-top: 8px;
+  border-top: 1px dashed var(--background-modifier-border);
+  font-size: 10.5px;
+  color: var(--text-muted);
+  line-height: 1.5;
+}
+
+.sovereign-wizard-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin: 12px 0;
+}
+
+.sovereign-wizard-list-row {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  padding: 8px 10px;
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 8px;
+  background: var(--background-secondary);
+}
+
+.sovereign-wizard-list-key {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--text-normal);
+}
+
+.sovereign-wizard-list-val {
+  font-size: 11.5px;
+  color: var(--text-muted);
+  line-height: 1.4;
+}
+
+.sovereign-wizard-status {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  padding: 9px 11px;
+  margin: 10px 0;
+  border-radius: 8px;
+  border: 1px solid var(--background-modifier-border);
+  background: var(--background-secondary);
+}
+
+.sovereign-wizard-status.is-ok {
+  border-color: rgba(16, 185, 129, 0.4);
+  background: rgba(16, 185, 129, 0.07);
+}
+
+.sovereign-wizard-status.is-warn {
+  border-color: rgba(245, 158, 11, 0.4);
+  background: rgba(245, 158, 11, 0.07);
+}
+
+.sovereign-wizard-status-text {
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.sovereign-wizard-meter {
+  height: 5px;
+  border-radius: 3px;
+  background: var(--background-modifier-border);
+  overflow: hidden;
+  margin: 10px 0 4px 0;
+}
+
+.sovereign-wizard-meter-fill {
+  height: 100%;
+  border-radius: 3px;
+  background: var(--interactive-accent);
+  transition: width 0.4s ease;
+}
+
+.sovereign-wizard-footer {
+  padding: 0;
+  flex-shrink: 0;
+}
+
+.sovereign-wizard-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 18px 14px 18px;
+  border-top: 1px solid var(--background-modifier-border);
+}
+
+/* Navigation rows appended directly to the frame footer carry no extra
+   top border of their own (the footer is already framed). */
+.sovereign-wizard-footer .sovereign-wizard-actions {
+  border-top: none;
+  padding-top: 12px;
+}
+
+/* Obsidian Setting rows keep their default left/right padding only when
+   hosted in the real settings tab; inside the wizard frame they align to
+   the frame's own 18px gutters. */
+.sovereign-wizard-body .setting-item {
+  padding: 10px 0;
+  border: none;
+}
+
+.sovereign-wizard-body .setting-item-control input[type="text"] {
+  width: 100%;
+  min-width: 0;
+}
+
+.sovereign-wizard-actions .sovereign-btn-primary {
+  margin-left: auto;
+}
+
+.sovereign-wizard-skip {
+  background: transparent;
+  border: none;
+  color: var(--text-faint);
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.sovereign-wizard-skip:hover {
+  color: var(--text-muted);
+  text-decoration: underline;
+}

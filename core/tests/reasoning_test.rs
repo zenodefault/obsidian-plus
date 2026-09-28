@@ -9,7 +9,7 @@ use sovereign_core::memory::MemoryApiError;
 use sovereign_core::models::HashEmbeddingProvider;
 use sovereign_core::protocol::{Envelope, ErrorCode};
 use sovereign_core::reasoning::{
-    answer, assemble, classify_query, evidence_answer, validate_citations, QueryType,
+    answer, answer_with_generation, assemble, classify_query, evidence_answer, validate_citations, QueryType,
     NO_EVIDENCE_MESSAGE,
 };
 use std::io::{BufReader, Write};use std::process::{Child, Command, Stdio};
@@ -128,6 +128,7 @@ fn evidence_only_answer_when_model_cannot_generate() {
         90,
     )
     .unwrap();
+    assert!(!idx.search("database", 6).unwrap().is_empty());
     let provider = HashEmbeddingProvider::new();
     let result = answer(&idx, &provider, "what did I decide about the database", 6).unwrap();
 
@@ -228,6 +229,82 @@ impl sovereign_core::models::ModelProvider for HonestProvider {
     fn dimension(&self) -> usize {
         384
     }
+}
+
+/// The generation-only configuration: embeddings work (hash), and the
+/// "chat model" answers honestly with valid citations — this is the qwen3
+/// via Ollama shim scenario end to end.
+struct ChatModelProvider;
+impl sovereign_core::models::ModelProvider for ChatModelProvider {
+    fn embed(&self, texts: &[String]) -> Result<Vec<Vec<f32>>, sovereign_core::models::ModelError> {
+        HashEmbeddingProvider::new().embed(texts)
+    }
+    fn generate(&self, _prompt: &str) -> Result<String, sovereign_core::models::ModelError> {
+        Ok("Your notes indicate PostgreSQL was chosen for the storage layer [Architecture/Database.md].".to_string())
+    }
+    fn name(&self) -> &'static str {
+        "chat-model-test"
+    }
+    fn dimension(&self) -> usize {
+        384
+    }
+}
+
+#[test]
+fn chat_model_answer_survives_citation_validation() {
+    // The generation-only link: embeddings keep the hash embedder, but the
+    // chat model drafts the answer (§75) instead of degrading to the
+    // evidence summary.
+    let idx = index();
+    idx.upsert_note(
+        "Architecture/Database.md",
+        "# Database\n\nWe decided to use PostgreSQL for the storage layer. It stores time series.",
+        1,
+        90,
+    )
+    .unwrap();
+    let result = answer(&idx, &ChatModelProvider, "what did I decide about the database", 6).unwrap();
+    assert_eq!(result.answer_mode, "model", "chat-model answer must not fall back to the evidence dump");
+    assert!(result.answer.starts_with("Your notes indicate"));
+    assert!(!result.answer.contains("Here is what your vault contains"));
+    assert!(result.confidence > 0.0);
+}
+
+struct GenerationOnlyProvider;
+impl sovereign_core::models::ModelProvider for GenerationOnlyProvider {
+    fn embed(&self, _texts: &[String]) -> Result<Vec<Vec<f32>>, sovereign_core::models::ModelError> {
+        Err(sovereign_core::models::ModelError::Runtime("a chat model must not embed retrieval".into()))
+    }
+    fn generate(&self, _prompt: &str) -> Result<String, sovereign_core::models::ModelError> {
+        Ok("Your notes currently indicate that PostgreSQL was chosen [Architecture/Database.md].".into())
+    }
+    fn name(&self) -> &'static str { "generation-only-test" }
+    fn dimension(&self) -> usize { 0 }
+}
+
+#[test]
+fn generation_only_model_does_not_drive_retrieval() {
+    let idx = index();
+    idx.upsert_note(
+        "Architecture/Database.md",
+        "# Database\n\nWe decided to use PostgreSQL for the storage layer.",
+        1,
+        70,
+    )
+    .unwrap();
+
+    // This mirrors qwen3 via Ollama: it can draft prose, while the hash
+    // embedder continues to select the evidence.
+    let result = answer_with_generation(
+        &idx,
+        &HashEmbeddingProvider::new(),
+        Some(&GenerationOnlyProvider),
+        "what did I decide about the database",
+        6,
+    )
+    .unwrap();
+    assert_eq!(result.answer_mode, "model");
+    assert!(result.answer.contains("currently indicate"));
 }
 
 #[test]

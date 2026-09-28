@@ -88,6 +88,10 @@ export interface ModelStatus {
   chunks_embedded: number;
   chunks_pending: number;
   validation_error?: string;
+  /** Chat model configured for generation (separate from embeddings). */
+  generation_model?: string;
+  /** Up-front validation error of the generation configuration, if broken. */
+  generation_error?: string;
 }
 
 // ---- Memory (§49–55) ----
